@@ -31,7 +31,7 @@
   };
 
   const DEFAULT_ATLAS_URL =
-    "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/atlas.parquet";
+    "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/display.parquet";
   const DEFAULT_SELECTIONS_URL =
     "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/selections.parquet";
   const DEFAULT_RUNS_URL =

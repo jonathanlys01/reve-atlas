@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     files = {
+        "display.parquet": "data/display.parquet",
         "atlas.parquet": "data/atlas.parquet",
         "selections.parquet": "data/selections.parquet",
         "selection_runs.parquet": "data/selection_runs.parquet",
