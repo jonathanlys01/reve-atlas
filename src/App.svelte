@@ -131,7 +131,8 @@
     await coordinator.exec(`SELECT ${REQUIRED_COLUMNS} FROM display_points LIMIT 0`);
     runs = (await coordinator.query(
       "SELECT * FROM selection_runs ORDER BY method, direction, scope, big_recording_index NULLS FIRST, run_id",
-    )) as unknown as Run[];
+      { type: "json" },
+    )) as Run[];
     if (!runs.length) throw new Error("The selection-runs table is empty.");
     const first = runs.find((run) => run.method === "ranking" && run.direction === "top" && run.scope === "global") ?? runs[0];
     activeRunId = first.run_id;
