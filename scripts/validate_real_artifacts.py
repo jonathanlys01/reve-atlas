@@ -51,9 +51,10 @@ def validate(config: dict[str, object]) -> None:
         if not np.isfinite(vendi) or not 1.0 - 1e-6 <= vendi <= size + 1e-6:
             raise AtlasDataError(f"Vendi out of bounds for run {row['run_id']}: {vendi} not in [1, {size}]")
     source_fingerprint = fingerprint_path(str(config["input"]["embeddings"]))
-    if manifest.get("source", {}).get("fingerprint") != source_fingerprint:
+    selection_manifest = manifest.get("selection", {})
+    if selection_manifest.get("population", "source") != "display" and manifest.get("source", {}).get("fingerprint") != source_fingerprint:
         raise AtlasDataError("Embedding source fingerprint does not match manifest")
-    if manifest.get("selection", {}).get("source_fingerprint") != source_fingerprint:
+    if selection_manifest.get("source_fingerprint") != source_fingerprint:
         raise AtlasDataError("Selection source fingerprint does not match manifest")
     if manifest.get("selection", {}).get("configuration_fingerprint") != config_fingerprint(config):
         raise AtlasDataError("Selection configuration fingerprint does not match manifest")

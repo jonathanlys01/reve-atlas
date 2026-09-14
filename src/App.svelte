@@ -16,7 +16,7 @@
     candidate_run_id: string | null;
     big_recording_index: number | null;
     candidate_k: number;
-    selection_k: number;
+    selection_eta: number;
     actual_size: number;
     kernel_method: "multiplicative" | "additive" | null;
     w_interaction: number | null;

@@ -1,20 +1,11 @@
 input:
-  embeddings: /path/to/embedding_shards
-  recording_metadata: /path/to/recording_metadata.parquet
-  metadata_columns: [dataset, modality, sampling_rate, n_channels]
+  # This private cache is extracted from display.parquet and the original
+  # shards; it contains embeddings only for the public display population.
+  embeddings: /path/to/display_selection_source.parquet
+  population: display
 
 output:
   directory: data/real
-
-projection:
-  method: umap
-  device: cuda
-  seed: 0
-  n_neighbors: 30
-  min_dist: 0.1
-  metric: cosine
-  fit_sample_size: 200000
-  transform_chunk_size: 50000
 
 rankings:
   - id: top_eta_001_per_recording
