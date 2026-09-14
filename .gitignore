@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.svelte-kit/
+.vite/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+data/*.parquet
+public/data/*.parquet
+.env.local

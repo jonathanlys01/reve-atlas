@@ -1,0 +1,30 @@
+{
+  "name": "reve-atlas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@uwdata/mosaic-core": "0.21.1",
+    "@uwdata/mosaic-spec": "0.21.1",
+    "@uwdata/mosaic-sql": "0.21.1",
+    "@uwdata/vgplot": "0.21.1",
+    "embedding-atlas": "0.24.0",
+    "svelte": "5.57.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.0.0",
+    "@tailwindcss/postcss": "4.2.2",
+    "@tsconfig/svelte": "5.0.8",
+    "postcss": "8.5.28",
+    "svelte-check": "4.4.5",
+    "tailwindcss": "4.2.2",
+    "typescript": "5.9.3",
+    "vite": "8.3.0"
+  }
+}

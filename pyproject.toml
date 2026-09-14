@@ -1,0 +1,26 @@
+[project]
+name = "reve-atlas-data"
+version = "0.1.0"
+description = "Synthetic data utilities for the REVE Embedding Atlas demo"
+requires-python = ">=3.12"
+dependencies = [
+    "huggingface-hub>=0.35.0",
+    "numpy>=2.2.4",
+    "pyarrow>=24.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "ruff>=0.11.2",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "PL", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
