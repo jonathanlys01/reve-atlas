@@ -45,6 +45,8 @@
     "big_recording_index", "session_index", "offset", "dataset", "modality",
     "sampling_rate", "n_channels",
   ].map((column) => `"${column}"`).join(", ");
+  const DISPLAY_POINT_CAP = 2_000_000;
+  const DISPLAY_SAMPLE_CAP = 1_760_000;
   const coordinator = new Coordinator();
   const webGpuAvailable = "gpu" in navigator;
 
@@ -94,15 +96,39 @@
   async function initialize(): Promise<void> {
     const wasm = await wasmConnector();
     coordinator.databaseConnector(wasm);
-    await coordinator.exec(`CREATE OR REPLACE TABLE atlas_points AS SELECT * FROM read_parquet(${SQL.literal(atlasUrl)})`);
-    await coordinator.exec(`SELECT ${REQUIRED_COLUMNS} FROM atlas_points LIMIT 0`);
+    await coordinator.exec(`CREATE OR REPLACE VIEW atlas_source AS SELECT * FROM read_parquet(${SQL.literal(atlasUrl)})`);
     realMode = Boolean(selectionsUrl && runsUrl);
     if (!realMode) {
-      await coordinator.exec("CREATE OR REPLACE VIEW dataset AS SELECT * FROM atlas_points");
+      await coordinator.exec(`
+        CREATE OR REPLACE TABLE display_points AS
+        SELECT * FROM atlas_source
+        WHERE hash(row_id) % 100 < 8
+        LIMIT ${DISPLAY_POINT_CAP}
+      `);
+      await coordinator.exec(`SELECT ${REQUIRED_COLUMNS} FROM display_points LIMIT 0`);
+      await coordinator.exec("CREATE OR REPLACE VIEW dataset AS SELECT * FROM display_points");
       return;
     }
     await coordinator.exec(`CREATE OR REPLACE TABLE selection_memberships AS SELECT * FROM read_parquet(${SQL.literal(selectionsUrl)})`);
     await coordinator.exec(`CREATE OR REPLACE TABLE selection_runs AS SELECT * FROM read_parquet(${SQL.literal(runsUrl)})`);
+    await coordinator.exec(`
+      CREATE OR REPLACE TABLE display_points AS
+      WITH required_points AS (
+        SELECT DISTINCT atlas_source.*
+        FROM atlas_source
+        INNER JOIN (SELECT DISTINCT row_id FROM selection_memberships) AS members USING (row_id)
+      ), sampled_points AS (
+        SELECT atlas_source.*
+        FROM atlas_source
+        WHERE hash(atlas_source.row_id) % 100 < 8
+          AND NOT EXISTS (SELECT 1 FROM required_points WHERE required_points.row_id = atlas_source.row_id)
+        LIMIT ${DISPLAY_SAMPLE_CAP}
+      )
+      SELECT * FROM required_points
+      UNION ALL
+      SELECT * FROM sampled_points
+    `);
+    await coordinator.exec(`SELECT ${REQUIRED_COLUMNS} FROM display_points LIMIT 0`);
     runs = (await coordinator.query(
       "SELECT * FROM selection_runs ORDER BY method, direction, scope, big_recording_index NULLS FIRST, run_id",
     )) as unknown as Run[];
@@ -125,10 +151,10 @@
       ), candidate_members AS (
         SELECT row_id, rank AS candidate_rank FROM selection_memberships WHERE run_id = ${candidateRun}
       )
-      SELECT atlas_points.*, selected_members.selected_rank, candidate_members.candidate_rank,
+      SELECT display_points.*, selected_members.selected_rank, candidate_members.candidate_rank,
         selected_members.row_id IS NOT NULL AS selected,
         candidate_members.row_id IS NOT NULL AS candidate
-      FROM atlas_points
+      FROM display_points
       LEFT JOIN selected_members USING (row_id)
       LEFT JOIN candidate_members USING (row_id)
       ${filter}
@@ -171,6 +197,7 @@
         <p class="eyebrow">REVE explorer</p>
         <h1>Embedding Atlas</h1>
         <p class="rail-copy">Switch among precomputed rankings and diversity selections.</p>
+        <p class="display-note">Display cap: about 2M points; all selection members are retained.</p>
         <div class="control-stack">
           <label>Method<select bind:value={selectedMethod} onchange={onFilterChange}><option value="ranking">Ranking</option><option value="dpp">DPP selection</option></select></label>
           <label>Direction<select bind:value={selectedDirection} onchange={onFilterChange}><option value="top">Top loss</option><option value="bottom">Bottom loss</option></select></label>
@@ -222,7 +249,8 @@
   h2 { margin: 0.1rem 0 0.3rem; font-size: 1.15rem; }
   h3 { margin: 1.25rem 0 0.25rem; color: #526078; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
   p { margin: 0; color: #526078; line-height: 1.45; }
-  .rail-copy { margin-bottom: 1.25rem; font-size: 0.78rem; }
+  .rail-copy { margin-bottom: 0.35rem; font-size: 0.78rem; }
+  .display-note { margin-bottom: 1.25rem; color: #7c879b; font-size: 0.68rem; }
   .eyebrow { margin-bottom: 0.45rem; color: #c2415a; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
   .control-stack { display: grid; gap: 0.75rem; }
   label { display: grid; gap: 0.25rem; color: #526078; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }

@@ -47,7 +47,7 @@ PYTHONPATH=. uv run python -m scripts.run_real_atlas --config /tmp/real_atlas.ya
 ```
 
 The output directory contains `atlas.parquet`, `selections.parquet`,
-`selection_runs.parquet`, `manifest.json`, and validation logs. The manifest records
+`selection_runs.parquet`, `manifest.json`, and validation logs. The browser applies a deterministic ~2M-point display cap while retaining all rows referenced by the selection tables. The manifest records
 the source/configuration fingerprints, projection provenance, and selection sweep counts.
 The validator can be rerun independently:
 
