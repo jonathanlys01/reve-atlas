@@ -30,12 +30,16 @@
     adjacent_jaccard: number | null;
   };
 
-  const DEFAULT_DATA_URL =
-    "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/demo.parquet";
+  const DEFAULT_ATLAS_URL =
+    "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/atlas.parquet";
+  const DEFAULT_SELECTIONS_URL =
+    "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/selections.parquet";
+  const DEFAULT_RUNS_URL =
+    "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/selection_runs.parquet";
   const atlasUrl =
-    import.meta.env.VITE_ATLAS_ATLAS_URL ?? import.meta.env.VITE_ATLAS_DATA_URL ?? DEFAULT_DATA_URL;
-  const selectionsUrl = import.meta.env.VITE_ATLAS_SELECTIONS_URL;
-  const runsUrl = import.meta.env.VITE_ATLAS_RUNS_URL;
+    import.meta.env.VITE_ATLAS_ATLAS_URL ?? import.meta.env.VITE_ATLAS_DATA_URL ?? DEFAULT_ATLAS_URL;
+  const selectionsUrl = import.meta.env.VITE_ATLAS_SELECTIONS_URL ?? DEFAULT_SELECTIONS_URL;
+  const runsUrl = import.meta.env.VITE_ATLAS_RUNS_URL ?? DEFAULT_RUNS_URL;
   const REQUIRED_COLUMNS = [
     "row_id", "window_id", "projection_x", "projection_y", "recon_loss",
     "big_recording_index", "session_index", "offset", "dataset", "modality",
@@ -208,7 +212,8 @@
 {/await}
 
 <style>
-  .atlas-app { display: grid; grid-template-columns: 17rem minmax(0, 1fr) 17rem; width: 100%; height: 100%; background: #f5f7fb; }
+  .atlas-app { display: grid; grid-template-columns: 17rem minmax(0, 1fr) 17rem; min-width: 0; min-height: 0; width: 100%; height: 100%; overflow: hidden; background: #f5f7fb; }
+  .atlas-app:not(.real-mode) { display: block; }
   .atlas-shell { min-width: 0; width: 100%; height: 100%; }
   .control-rail, .metrics-rail { z-index: 2; box-sizing: border-box; overflow: auto; padding: 1.25rem 1rem; border-color: #dfe5f0; background: rgb(255 255 255 / 96%); }
   .control-rail { border-right: 1px solid #dfe5f0; }

@@ -11,8 +11,7 @@ npm install
 npm run dev
 ```
 
-The default dataset is
-`https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/demo.parquet`. Override it for local testing:
+The default build uses the real atlas tables on Hugging Face. Override it for the synthetic demo or a local file:
 
 ```bash
 VITE_ATLAS_DATA_URL=http://localhost:8000/demo.parquet npm run dev
