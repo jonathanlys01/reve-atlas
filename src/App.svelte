@@ -46,6 +46,13 @@
     "big_recording_index", "session_index", "offset", "dataset", "modality",
     "sampling_rate", "n_channels",
   ].map((column) => `"${column}"`).join(", ");
+  const DATASET_COLORS = [
+    "#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2",
+    "#eeca3b", "#b279a2", "#ff9da6", "#9d755d", "#bab0ac",
+  ];
+  const POINT_LABEL_SQL = `(
+    dataset || ' · ' || modality || ' · ' || n_channels::VARCHAR || ' ch · rec ' || big_recording_index::VARCHAR
+  ) AS point_label`;
   const DISPLAY_POINT_CAP = 2_000_000;
   const DISPLAY_SAMPLE_CAP = 1_760_000;
   const coordinator = new Coordinator();
@@ -124,12 +131,12 @@
     if (!realMode) {
       await coordinator.exec(`
         CREATE OR REPLACE TABLE display_points AS
-        SELECT * FROM atlas_source
+        SELECT *, ${POINT_LABEL_SQL}
+        FROM atlas_source
         WHERE hash(row_id) % 100 < 8
         LIMIT ${DISPLAY_POINT_CAP}
       `);
       await coordinator.exec(`SELECT ${REQUIRED_COLUMNS} FROM display_points LIMIT 0`);
-      await coordinator.exec("CREATE OR REPLACE VIEW dataset AS SELECT * FROM display_points");
       return;
     }
     await coordinator.exec(`CREATE OR REPLACE TABLE selection_memberships AS SELECT * FROM read_parquet(${SQL.literal(selectionsUrl)})`);
@@ -147,9 +154,11 @@
           AND NOT EXISTS (SELECT 1 FROM required_points WHERE required_points.row_id = atlas_source.row_id)
         LIMIT ${DISPLAY_SAMPLE_CAP}
       )
-      SELECT * FROM required_points
-      UNION ALL
-      SELECT * FROM sampled_points
+      SELECT *, ${POINT_LABEL_SQL} FROM (
+        SELECT * FROM required_points
+        UNION ALL
+        SELECT * FROM sampled_points
+      )
     `);
     await coordinator.exec(`SELECT ${REQUIRED_COLUMNS} FROM display_points LIMIT 0`);
     runs = (await coordinator.query(
@@ -174,7 +183,7 @@
       const filter = viewMode === "selected" ? "WHERE selected_members.row_id IS NOT NULL" :
         viewMode === "candidate" ? "WHERE candidate_members.row_id IS NOT NULL" : "";
       await coordinator.exec(`
-      CREATE OR REPLACE VIEW active_points AS
+      CREATE OR REPLACE TABLE active_points AS
       WITH selected_members AS (
         SELECT row_id, rank AS selected_rank FROM selection_memberships WHERE run_id IN (${selectedRuns})
       ), candidate_members AS (
@@ -251,13 +260,15 @@
       {#key realMode ? activeTableVersion : "demo"}
         <EmbeddingAtlas
           {coordinator}
-          data={{ table: realMode ? "active_points" : "dataset", id: "row_id", text: "window_id", projection: { x: "projection_x", y: "projection_y" } }}
+          data={{ table: realMode ? "active_points" : "display_points", id: "row_id", text: "point_label", projection: { x: "projection_x", y: "projection_y" } }}
           defaultChartsConfig={{
-            include: realMode ? ["recon_loss", "dataset", "modality", "big_recording_index", "selected", "candidate"] : ["recon_loss"],
-            embedding: { data: { x: "projection_x", y: "projection_y", text: "window_id", category: realMode ? "display_category" : null } },
+            include: realMode
+              ? ["recon_loss", "dataset", "n_channels", "modality", "big_recording_index", "selected", "candidate"]
+              : ["recon_loss", "dataset", "n_channels"],
+            embedding: { data: { x: "projection_x", y: "projection_y", text: "point_label", category: "dataset" } },
             table: true,
           }}
-          chartTheme={{ categoryColors: ["#94a3b8", "#f59e0b", "#e11d48"] }}
+          chartTheme={{ categoryColors: DATASET_COLORS }}
           embeddingViewConfig={{ downsampleMaxPoints: DISPLAY_POINT_CAP, pointSize: 1.5 }}
         />
       {/key}
