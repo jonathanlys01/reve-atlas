@@ -58,7 +58,7 @@ PYTHONPATH=. uv run python -m scripts.validate_real_artifacts --config /tmp/real
 For the demo selection sweep, treat the deterministic `display.parquet` population as the full candidate set. Extract its private embeddings, then run the display config separately (the private cache is never uploaded):
 
 ```bash
-uv run python scripts/build_display_selection_source.py --source-dir /path/to/embedding_shards --display-parquet data/real/display.parquet --output data/real/display_selection_source.parquet
+uv run python scripts/build_display_selection_source.py --source /path/to/embedding_shards --display data/real/display.parquet --output data/real/display_selection_source.parquet
 PYTHONPATH=. uv run python -m scripts.build_selections --config /tmp/real_atlas_display.yaml
 PYTHONPATH=. uv run python -m scripts.validate_real_artifacts --config /tmp/real_atlas_display.yaml
 ```
