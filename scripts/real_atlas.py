@@ -461,14 +461,22 @@ def project_embeddings(embeddings: np.ndarray, projection: dict[str, Any]) -> tu
     rng = np.random.default_rng(seed)
     fit_indices = np.sort(rng.choice(len(embeddings), size=fit_sample_size, replace=False))
     fit_values = np.asarray(embeddings[fit_indices], dtype=np.float32)
+    embedding_preprocessing = "none"
+    if str(projection.get("metric", "euclidean")).lower() == "cosine":
+        fit_norms = np.linalg.norm(fit_values, axis=1)
+        if not np.all(np.isfinite(fit_norms)) or np.any(fit_norms <= 0):
+            raise AtlasDataError("Projection fit sample contains zero-norm or non-finite embeddings")
+        fit_values = fit_values / fit_norms[:, None]
+        embedding_preprocessing = "l2_normalize_for_cosine"
     backend = ""
     device = "cpu"
     parameters = {
         key: value
         for key, value in projection.items()
-        if key not in {"method", "seed", "device", "fit_sample_size", "transform_chunk_size", "out_of_sample", "interpolation_neighbors", "interpolation_temperature"}
+        if key not in {"method", "seed", "device", "fit_sample_size", "transform_chunk_size", "out_of_sample", "interpolation_neighbors", "interpolation_temperature", "parallel"}
     }
 
+    parallel = bool(projection.get("parallel", False))
     if method == "umap":
         try:
             if device_requested == "cuda":
@@ -485,7 +493,8 @@ def project_embeddings(embeddings: np.ndarray, projection: dict[str, Any]) -> tu
                 import umap
             except ImportError as error:
                 raise AtlasDataError("UMAP requested but neither cuML nor umap-learn is installed") from error
-            parameters["random_state"] = seed
+            if not parallel:
+                parameters["random_state"] = seed
             model = umap.UMAP(**parameters)
             projected = model.fit_transform(fit_values)
             backend = "umap-learn"
@@ -544,6 +553,8 @@ def project_embeddings(embeddings: np.ndarray, projection: dict[str, Any]) -> tu
         "out_of_sample": str(projection.get("out_of_sample", "nearest_neighbor")),
         "interpolation_neighbors": int(projection.get("interpolation_neighbors", 8)),
         "interpolation_temperature": float(projection.get("interpolation_temperature", 12.0)),
+        "embedding_preprocessing": embedding_preprocessing,
+        "parallel": parallel,
         "parameters": parameters,
         "packages": runtime_provenance(),
     }

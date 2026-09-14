@@ -1,0 +1,19 @@
+# Projection-only config for the public display population. The private
+# display embedding cache is the complete population for this demo.
+projection:
+  method: umap
+  device: cuda
+  seed: 0
+  n_neighbors: 30
+  min_dist: 0.1
+  metric: cosine
+  n_epochs: 200
+  low_memory: true
+  n_jobs: 32
+  # Parallel UMAP fit is intentionally nondeterministic; seed is still recorded.
+  parallel: true
+  fit_sample_size: 100000
+  transform_chunk_size: 4096
+  out_of_sample: nearest_neighbor
+  interpolation_neighbors: 16
+  interpolation_temperature: 12
