@@ -32,6 +32,45 @@ uv run python scripts/publish_hf.py
 The publishing command uses the Hugging Face token configured on the machine, creates
 `jonathan-lys/reve-atlas` as a public dataset if needed, and uploads the Parquet file and dataset card.
 
+
+
+## Generate the real-data atlas
+
+The real-data build reads the source embedding shards and an explicit recording-metadata
+allowlist, then writes a public atlas table without embedding vectors plus ranking/DPP
+selection tables. The checked-in example is a template; set the private input paths in a
+copied config before running:
+
+```bash
+cp configs/real_atlas.example.yaml /tmp/real_atlas.yaml
+# edit input.embeddings, input.recording_metadata, and output.directory
+PYTHONPATH=. uv run python -m scripts.run_real_atlas --config /tmp/real_atlas.yaml
+```
+
+The output directory contains `atlas.parquet`, `selections.parquet`,
+`selection_runs.parquet`, `manifest.json`, and validation logs. The manifest records
+the source/configuration fingerprints, projection provenance, and selection sweep counts.
+The validator can be rerun independently:
+
+```bash
+PYTHONPATH=. uv run python -m scripts.validate_real_artifacts --config /tmp/real_atlas.yaml
+```
+
+For the real-data frontend, configure all three public table URLs at build time:
+
+```bash
+VITE_ATLAS_ATLAS_URL=https://huggingface.co/datasets/ORG/REPO/resolve/main/data/atlas.parquet \
+VITE_ATLAS_SELECTIONS_URL=https://huggingface.co/datasets/ORG/REPO/resolve/main/data/selections.parquet \
+VITE_ATLAS_RUNS_URL=https://huggingface.co/datasets/ORG/REPO/resolve/main/data/selection_runs.parquet \
+npm run build
+```
+
+Publish the validated real-data tables with:
+
+```bash
+uv run python scripts/publish_real_hf.py --repo-id jonathan-lys/reve-atlas --data-dir data/real --card hf/README.real.md
+```
+
 ## Checks
 
 ```bash

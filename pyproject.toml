@@ -7,6 +7,10 @@ dependencies = [
     "huggingface-hub>=0.35.0",
     "numpy>=2.2.4",
     "pyarrow>=24.0.0",
+    "pyyaml>=6.0.2",
+    "scikit-learn>=1.6.1",
+    "scipy>=1.15.2",
+    "umap-learn>=0.5.7",
 ]
 
 [dependency-groups]
@@ -20,6 +24,7 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "PL", "SIM"]
+ignore = ["E501", "PLC0415", "PLR0912", "PLR0913", "PLR0915", "PLR0917", "PLR2004", "PLW2901", "SIM105", "SIM108"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
