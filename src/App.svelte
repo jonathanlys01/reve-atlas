@@ -71,20 +71,40 @@
   $: availableRecordings = [
     "all",
     ...new Set(
-      runs.filter((run) => run.big_recording_index !== null)
+      runs.filter((run) => run.method === selectedMethod &&
+        run.direction === selectedDirection &&
+        run.scope === (selectedMethod === "dpp" ? "per_recording" : selectedScope) &&
+        (selectedMethod === "ranking" || run.kernel_method === selectedKernel) &&
+        run.big_recording_index !== null)
         .map((run) => run.big_recording_index as number)
         .sort((a, b) => a - b).map(String),
     ),
   ];
   $: validRuns = runs.filter((run) => {
-    const recordingMatches = selectedRecording === "all"
+    const recordingMatches = selectedScope === "global"
       ? run.big_recording_index === null
-      : String(run.big_recording_index) === selectedRecording;
+      : selectedRecording === "all" || String(run.big_recording_index) === selectedRecording;
     return run.method === selectedMethod && run.direction === selectedDirection &&
       run.scope === selectedScope && recordingMatches &&
       (selectedMethod === "ranking" || run.kernel_method === selectedKernel);
   });
   $: activeRun = validRuns.find((run) => run.run_id === activeRunId) ?? validRuns[0] ?? null;
+  function sameSelectionSweep(left: Run, right: Run): boolean {
+    return left.method === right.method && left.config_id === right.config_id &&
+      left.direction === right.direction && left.scope === right.scope &&
+      left.kernel_method === right.kernel_method && left.w_interaction === right.w_interaction;
+  }
+  $: interactionRuns = selectedRecording === "all" && selectedScope === "per_recording"
+    ? validRuns.filter((run, index, all) => all.findIndex((candidate) => sameSelectionSweep(candidate, run)) === index)
+    : validRuns;
+  function runsForActiveView(run: Run): Run[] {
+    if (run.scope !== "per_recording" || selectedRecording !== "all") return [run];
+    const matchingRuns = validRuns.filter((candidate) => sameSelectionSweep(candidate, run));
+    return matchingRuns.length ? matchingRuns : [run];
+  }
+  $: activeViewRuns = activeRun ? runsForActiveView(activeRun) : [];
+  $: activeViewCandidateK = activeViewRuns.reduce((total, run) => total + run.candidate_k, 0);
+  $: activeViewSize = activeViewRuns.reduce((total, run) => total + run.actual_size, 0);
   $: tradeoffRuns = activeRun?.method === "dpp"
     ? runs.filter((run) => run.method === "dpp" && run.direction === activeRun?.direction &&
         run.scope === activeRun?.scope && run.big_recording_index === activeRun?.big_recording_index &&
@@ -146,16 +166,19 @@
     const requestId = ++refreshSerial;
     refreshChain = refreshChain.catch(() => undefined).then(async () => {
       if (!realMode || !run || requestId !== refreshSerial) return;
-      const selectedRun = SQL.literal(run.run_id);
-      const candidateRun = SQL.literal(run.method === "dpp" ? run.candidate_run_id ?? run.run_id : run.run_id);
+      const viewRuns = runsForActiveView(run);
+      const selectedRuns = viewRuns.map((item) => SQL.literal(item.run_id)).join(", ");
+      const candidateRuns = viewRuns
+        .map((item) => SQL.literal(item.method === "dpp" ? item.candidate_run_id ?? item.run_id : item.run_id))
+        .join(", ");
       const filter = viewMode === "selected" ? "WHERE selected_members.row_id IS NOT NULL" :
         viewMode === "candidate" ? "WHERE candidate_members.row_id IS NOT NULL" : "";
       await coordinator.exec(`
       CREATE OR REPLACE VIEW active_points AS
       WITH selected_members AS (
-        SELECT row_id, rank AS selected_rank FROM selection_memberships WHERE run_id = ${selectedRun}
+        SELECT row_id, rank AS selected_rank FROM selection_memberships WHERE run_id IN (${selectedRuns})
       ), candidate_members AS (
-        SELECT row_id, rank AS candidate_rank FROM selection_memberships WHERE run_id = ${candidateRun}
+        SELECT row_id, rank AS candidate_rank FROM selection_memberships WHERE run_id IN (${candidateRuns})
       )
       SELECT display_points.*, selected_members.selected_rank, candidate_members.candidate_rank,
         selected_members.row_id IS NOT NULL AS selected,
@@ -178,10 +201,11 @@
   async function onFilterChange(): Promise<void> {
     if (selectedMethod === "dpp") selectedScope = "per_recording";
     if (selectedScope === "global") selectedRecording = "all";
-    if (selectedScope === "per_recording" && selectedRecording === "all") {
-      selectedRecording = availableRecordings.find((recording) => recording !== "all") ?? "all";
-    }
     await tick();
+    if (selectedScope === "per_recording" && selectedRecording !== "all" && !availableRecordings.includes(selectedRecording)) {
+      selectedRecording = "all";
+      await tick();
+    }
     const next = validRuns[0] ?? null;
     activeRunId = next?.run_id ?? "";
     await refreshActiveView(next);
@@ -211,14 +235,14 @@
         <p class="eyebrow">REVE explorer</p>
         <h1>Embedding Atlas</h1>
         <p class="rail-copy">Switch among precomputed rankings and diversity selections.</p>
-        <p class="display-note">Display cap: about 2M points; all selection members are retained.</p>
+        <p class="display-note">Display cap: about 2M points; all selection members are retained. Per-recording views union matching intra-index runs.</p>
         <div class="control-stack">
           <label>Method<select bind:value={selectedMethod} onchange={onFilterChange}><option value="ranking">Ranking</option><option value="dpp">DPP selection</option></select></label>
           <label>Direction<select bind:value={selectedDirection} onchange={onFilterChange}><option value="top">Top loss</option><option value="bottom">Bottom loss</option></select></label>
           <label>Scope<select bind:value={selectedScope} onchange={onFilterChange}><option value="global">Global</option><option value="per_recording">Per recording</option></select></label>
-          <label>Recording<select bind:value={selectedRecording} onchange={onFilterChange} disabled={selectedScope === "global"}>{#each availableRecordings as recording}<option value={recording}>{recording === "all" ? "All recordings" : recording}</option>{/each}</select></label>
+          <label>Recording<select bind:value={selectedRecording} onchange={onFilterChange} disabled={selectedScope === "global"}>{#each availableRecordings as recording}<option value={recording}>{recording === "all" ? "All indexed recordings" : recording}</option>{/each}</select></label>
           <label>Kernel<select bind:value={selectedKernel} onchange={onFilterChange} disabled={selectedMethod === "ranking"}><option value="multiplicative">Multiplicative · utility ↑</option><option value="additive">Additive · diversity ↑</option></select></label>
-          <label>Interaction run<select bind:value={activeRunId} onchange={() => refreshActiveView(activeRun)}>{#each validRuns as run}<option value={run.run_id}>{run.method === "ranking" ? `${run.config_id} · ${run.actual_size} rows` : `w=${run.w_interaction} · ${run.actual_size} rows`}</option>{/each}</select></label>
+          <label>Selection sweep<select bind:value={activeRunId} onchange={() => refreshActiveView(activeRun)}>{#each interactionRuns as run}<option value={run.run_id}>{run.method === "ranking" ? `${run.config_id} · ${run.actual_size} rows` : `w=${run.w_interaction} · ${run.actual_size} rows`}</option>{/each}</select></label>
           <label>View<select bind:value={viewMode} onchange={() => refreshActiveView(activeRun)}><option value="all">All atlas points</option><option value="candidate">Candidate pool</option><option value="selected">Selected rows only</option></select></label>
         </div>
       </aside>
@@ -243,11 +267,12 @@
         <p class="eyebrow">Active run</p>
         <h2>{activeRun.method === "dpp" ? "DPP selection" : "Loss ranking"}</h2>
         <p class="run-id">{activeRun.run_id}</p>
+        {#if activeViewRuns.length > 1}<p class="view-note">Showing {activeViewRuns.length} intra-index runs in this view.</p>{/if}
         <div class="metric-grid">
           <div class="metric hero"><strong>{formatNumber(activeRun.vendi_score)}</strong><span>Vendi diversity</span></div>
           <div class="metric"><strong>{formatNumber(activeRun.log_det)}</strong><span>log determinant</span></div>
-          <div class="metric"><strong>{activeRun.candidate_k}</strong><span>candidate rows</span></div>
-          <div class="metric"><strong>{activeRun.actual_size}</strong><span>selected rows</span></div>
+          <div class="metric"><strong>{activeViewCandidateK}</strong><span>candidate rows in view</span></div>
+          <div class="metric"><strong>{activeViewSize}</strong><span>selected rows in view</span></div>
           <div class="metric"><strong>{formatNumber(activeRun.mean_recon_loss)}</strong><span>mean loss</span></div>
           <div class="metric"><strong>{formatNumber(activeRun.median_recon_loss)}</strong><span>median loss</span></div>
           {#if activeRun.method === "dpp"}<div class="metric"><strong>{formatNumber(activeRun.baseline_jaccard)}</strong><span>baseline Jaccard</span></div><div class="metric"><strong>{formatNumber(activeRun.adjacent_jaccard)}</strong><span>adjacent Jaccard</span></div>{/if}
@@ -280,7 +305,8 @@
   label { display: grid; gap: 0.25rem; color: #526078; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
   select { width: 100%; min-width: 0; box-sizing: border-box; padding: 0.45rem 0.4rem; border: 1px solid #d4dbea; border-radius: 0.35rem; color: #172033; background: #fff; font-size: 0.75rem; text-transform: none; }
   select:disabled { color: #8b95a8; background: #f3f5f9; }
-  .run-id { overflow: hidden; margin-bottom: 1rem; color: #8792a7; font: 0.6rem ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+  .run-id { overflow: hidden; margin-bottom: 0.45rem; color: #8792a7; font: 0.6rem ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+  .view-note { margin-bottom: 1rem; color: #69758b; font-size: 0.68rem; }
   .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem 0.55rem; }
   .metric { display: grid; gap: 0.1rem; }
   .metric strong { color: #202d91; font-size: 0.92rem; }
