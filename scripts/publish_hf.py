@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+from http import HTTPStatus
 from pathlib import Path
 
 from huggingface_hub import HfApi
+from huggingface_hub.errors import HfHubHTTPError
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,7 +27,15 @@ def main() -> None:
         raise FileNotFoundError(f"Dataset card not found: {args.card}")
 
     api = HfApi()
-    api.create_repo(args.repo_id, repo_type="dataset", private=False, exist_ok=True)
+    try:
+        api.create_repo(args.repo_id, repo_type="dataset", private=False, exist_ok=True)
+    except HfHubHTTPError as error:
+        if error.response.status_code == HTTPStatus.FORBIDDEN:
+            raise PermissionError(
+                "The configured Hugging Face token cannot create this dataset. "
+                "Log in with a token that has write access and rerun the command.",
+            ) from error
+        raise
     api.upload_file(
         path_or_fileobj=args.parquet,
         path_in_repo="data/demo.parquet",
