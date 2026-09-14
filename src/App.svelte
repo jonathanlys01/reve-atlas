@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Coordinator, wasmConnector } from "@uwdata/mosaic-core";
   import * as SQL from "@uwdata/mosaic-sql";
+  import { tick } from "svelte";
   import { EmbeddingAtlas } from "embedding-atlas/svelte";
 
   type Method = "ranking" | "dpp";
@@ -64,6 +65,8 @@
   let selectedKernel: "multiplicative" | "additive" = "multiplicative";
   let viewMode: ViewMode = "all";
   let activeTableVersion = 0;
+  let refreshSerial = 0;
+  let refreshChain: Promise<void> = Promise.resolve();
 
   $: availableRecordings = [
     "all",
@@ -140,12 +143,14 @@
   }
 
   async function refreshActiveView(run: Run | null = activeRun): Promise<void> {
-    if (!realMode || !run) return;
-    const selectedRun = SQL.literal(run.run_id);
-    const candidateRun = SQL.literal(run.method === "dpp" ? run.candidate_run_id ?? run.run_id : run.run_id);
-    const filter = viewMode === "selected" ? "WHERE selected_members.row_id IS NOT NULL" :
-      viewMode === "candidate" ? "WHERE candidate_members.row_id IS NOT NULL" : "";
-    await coordinator.exec(`
+    const requestId = ++refreshSerial;
+    refreshChain = refreshChain.catch(() => undefined).then(async () => {
+      if (!realMode || !run || requestId !== refreshSerial) return;
+      const selectedRun = SQL.literal(run.run_id);
+      const candidateRun = SQL.literal(run.method === "dpp" ? run.candidate_run_id ?? run.run_id : run.run_id);
+      const filter = viewMode === "selected" ? "WHERE selected_members.row_id IS NOT NULL" :
+        viewMode === "candidate" ? "WHERE candidate_members.row_id IS NOT NULL" : "";
+      await coordinator.exec(`
       CREATE OR REPLACE VIEW active_points AS
       WITH selected_members AS (
         SELECT row_id, rank AS selected_rank FROM selection_memberships WHERE run_id = ${selectedRun}
@@ -154,13 +159,20 @@
       )
       SELECT display_points.*, selected_members.selected_rank, candidate_members.candidate_rank,
         selected_members.row_id IS NOT NULL AS selected,
-        candidate_members.row_id IS NOT NULL AS candidate
+        candidate_members.row_id IS NOT NULL AS candidate,
+        CASE
+          WHEN selected_members.row_id IS NOT NULL THEN 2
+          WHEN candidate_members.row_id IS NOT NULL THEN 1
+          ELSE 0
+        END::INTEGER AS display_category
       FROM display_points
       LEFT JOIN selected_members USING (row_id)
       LEFT JOIN candidate_members USING (row_id)
       ${filter}
     `);
-    activeTableVersion += 1;
+      if (requestId === refreshSerial) activeTableVersion += 1;
+    });
+    await refreshChain;
   }
 
   async function onFilterChange(): Promise<void> {
@@ -169,6 +181,7 @@
     if (selectedScope === "per_recording" && selectedRecording === "all") {
       selectedRecording = availableRecordings.find((recording) => recording !== "all") ?? "all";
     }
+    await tick();
     const next = validRuns[0] ?? null;
     activeRunId = next?.run_id ?? "";
     await refreshActiveView(next);
@@ -212,7 +225,17 @@
     {/if}
     <section class="atlas-shell">
       {#key realMode ? activeTableVersion : "demo"}
-        <EmbeddingAtlas {coordinator} data={{ table: realMode ? "active_points" : "dataset", id: "row_id", text: "window_id", projection: { x: "projection_x", y: "projection_y" } }} initialState={{ layoutStates: { list: { showTable: true, showCharts: true, showEmbedding: true } } }} />
+        <EmbeddingAtlas
+          {coordinator}
+          data={{ table: realMode ? "active_points" : "dataset", id: "row_id", text: "window_id", projection: { x: "projection_x", y: "projection_y" } }}
+          defaultChartsConfig={{
+            include: realMode ? ["recon_loss", "dataset", "modality", "big_recording_index", "selected", "candidate"] : ["recon_loss"],
+            embedding: { data: { x: "projection_x", y: "projection_y", text: "window_id", category: realMode ? "display_category" : null } },
+            table: true,
+          }}
+          chartTheme={{ categoryColors: ["#94a3b8", "#f59e0b", "#e11d48"] }}
+          embeddingViewConfig={{ downsampleMaxPoints: DISPLAY_POINT_CAP, pointSize: 1.5 }}
+        />
       {/key}
     </section>
     {#if realMode && activeRun}
@@ -242,8 +265,8 @@
 <style>
   .atlas-app { display: grid; grid-template-columns: 17rem minmax(0, 1fr) 17rem; min-width: 0; min-height: 0; width: 100%; height: 100%; overflow: hidden; background: #f5f7fb; }
   .atlas-app:not(.real-mode) { display: block; }
-  .atlas-shell { min-width: 0; width: 100%; height: 100%; }
-  .control-rail, .metrics-rail { z-index: 2; box-sizing: border-box; overflow: auto; padding: 1.25rem 1rem; border-color: #dfe5f0; background: rgb(255 255 255 / 96%); }
+  .atlas-shell { min-width: 0; min-height: 0; width: 100%; height: 100%; overflow: hidden; position: relative; }
+  .control-rail, .metrics-rail { z-index: 2; box-sizing: border-box; min-width: 0; min-height: 0; overflow: auto; padding: 1.25rem 1rem; border-color: #dfe5f0; background: rgb(255 255 255 / 96%); }
   .control-rail { border-right: 1px solid #dfe5f0; }
   .metrics-rail { border-left: 1px solid #dfe5f0; }
   h1 { margin: 0 0 0.55rem; font-size: 1.45rem; letter-spacing: -0.04em; }
