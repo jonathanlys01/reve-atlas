@@ -75,6 +75,28 @@
   const POINT_LABEL_SQL = `(
     dataset || ' · ' || modality || ' · ' || n_channels::VARCHAR || ' ch · rec ' || big_recording_index::VARCHAR
   ) AS point_label`;
+  const CHANNEL_PREDICATE_ITEMS = [
+    { name: "19 ch", predicate: "n_channels = 19" },
+    { name: "21 ch", predicate: "n_channels = 21" },
+    { name: "22 ch", predicate: "n_channels = 22" },
+    { name: "Others LO (≤ 64 ch)", predicate: "n_channels <= 64 AND n_channels NOT IN (19, 21, 22)" },
+    { name: "125 ch", predicate: "n_channels = 125" },
+    { name: "128 ch", predicate: "n_channels = 128" },
+    { name: "129 ch", predicate: "n_channels = 129" },
+    { name: "Others HI (> 64 ch)", predicate: "n_channels > 64 AND n_channels NOT IN (125, 128, 129)" },
+  ];
+  const CHANNEL_GROUP_SQL = `(
+    CASE
+      WHEN n_channels = 19 THEN '19 ch'
+      WHEN n_channels = 21 THEN '21 ch'
+      WHEN n_channels = 22 THEN '22 ch'
+      WHEN n_channels = 125 THEN '125 ch'
+      WHEN n_channels = 128 THEN '128 ch'
+      WHEN n_channels = 129 THEN '129 ch'
+      WHEN n_channels <= 64 THEN 'Others LO (≤ 64 ch)'
+      ELSE 'Others HI (> 64 ch)'
+    END
+  ) AS channel_group`;
   // dataset_classes.task_modality/domain are comma-separated tag strings (a recording can carry
   // several tags at once). Keep them as plain strings on the table (embedding-atlas's default
   // per-column chart machinery doesn't handle LIST-typed columns well) and match individual tags
@@ -109,7 +131,7 @@
   let railTab: "explore" | "curves" = "explore";
   let activeTableName = "";
   let atlasDppMode: "all" | "selected" = "all";
-  let atlasDppDirection: "top" | "bottom" = "top";
+  let atlasDppDirection: "top" | "bottom" = "bottom";
   let atlasDppEta: Eta = "eta_010";
   let atlasDppKernel: "multiplicative" | "additive" = "multiplicative";
   let atlasWIndex = 0;
@@ -142,19 +164,31 @@
         : null,
     });
   }
-  type ChartPoint = { x: number; y: number; r: number; current: boolean; tooltip: string };
+  type ChartPoint = {
+    x: number;
+    y: number;
+    r: number;
+    current: boolean;
+    tooltip: string;
+    w: number | null;
+    kernel: "multiplicative" | "additive" | null;
+  };
   type BaselinePoint = { x: number; y: number; xLo: number; xHi: number; yLo: number; yHi: number; tooltip: string };
 
   let showBaseline = true;
-  let curveDirection: "top" | "bottom" = "top";
+  let curveDirection: "top" | "bottom" = "bottom";
   let curveEta: Eta = "eta_010";
   let curveKernel: "multiplicative" | "additive" = "multiplicative";
-  // The operating curve aggregates every recording (via curve_summary.parquet)
-  // rather than replaying one recording's noisy sweep, so it stays stable as
-  // w varies and is comparable against the stratified baseline below.
-  $: operatingCurve = curveSummary
+  // The operating curves aggregate every recording (via curve_summary.parquet)
+  // rather than replaying one recording's noisy sweep, so they stay stable as
+  // w varies and are comparable against the stratified baseline below.
+  $: curveMultiplicative = curveSummary
     .filter((row) => row.method === "dpp" && row.direction === curveDirection &&
-      row.selection_eta === (curveEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === curveKernel)
+      row.selection_eta === (curveEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === "multiplicative")
+    .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0));
+  $: curveAdditive = curveSummary
+    .filter((row) => row.method === "dpp" && row.direction === curveDirection &&
+      row.selection_eta === (curveEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === "additive")
     .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0));
   $: strataBaseline = curveSummary.find((row) =>
     row.method === "random_stratified" && row.selection_eta === (curveEta === "eta_010" ? 0.10 : 0.01)) ?? null;
@@ -162,17 +196,19 @@
   // the axis bounds can squash the curve down to a sliver — showBaseline lets it
   // be excluded from both the plotted marker and the bounds it would otherwise stretch.
   $: effectiveBaseline = showBaseline ? strataBaseline : null;
-  $: curvePoints = effectiveBaseline ? [...operatingCurve, effectiveBaseline] : operatingCurve;
-  $: vendiMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.vendi_score_q25)) : 0;
-  $: vendiMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.vendi_score_q75)) : 1;
-  $: cosineMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.mean_pairwise_cosine_q25)) : 0;
-  $: cosineMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.mean_pairwise_cosine_q75)) : 1;
-  $: lossMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.mean_recon_loss_q25)) : 0;
-  $: lossMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.mean_recon_loss_q75)) : 1;
+  $: curvePoints = effectiveBaseline
+    ? [...curveMultiplicative, ...curveAdditive, effectiveBaseline]
+    : [...curveMultiplicative, ...curveAdditive];
+  $: vendiMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.vendi_score_q25 ?? row.vendi_score_mean)) : 0;
+  $: vendiMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.vendi_score_q75 ?? row.vendi_score_mean)) : 1;
+  $: cosineMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.mean_pairwise_cosine_q25 ?? row.mean_pairwise_cosine_mean)) : 0;
+  $: cosineMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.mean_pairwise_cosine_q75 ?? row.mean_pairwise_cosine_mean)) : 1;
+  $: lossMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.mean_recon_loss_q25 ?? row.mean_recon_loss_mean)) : 0;
+  $: lossMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.mean_recon_loss_q75 ?? row.mean_recon_loss_mean)) : 1;
   const CHART_LEFT = 34;
   const CHART_RIGHT = 406;
-  const CHART_TOP = 12;
-  const CHART_BOTTOM = 174;
+  const CHART_TOP = 14;
+  const CHART_BOTTOM = 238;
   function scaleX(value: number, min: number, max: number): number {
     return CHART_LEFT + ((value - min) / Math.max(max - min, 1e-9)) * (CHART_RIGHT - CHART_LEFT);
   }
@@ -194,7 +230,9 @@
       y: scaleY(row.mean_recon_loss_mean, yMin, yMax),
       r: row.w_interaction === currentWeight ? 6 : 4,
       current: row.w_interaction === currentWeight,
-      tooltip: `w=${row.w_interaction} · ${xLabel} ${xOf(row).toPrecision(4)} · loss ${row.mean_recon_loss_mean.toPrecision(4)} (mean of ${row.recording_count} recordings)`,
+      w: row.w_interaction,
+      kernel: (row.kernel_method === "multiplicative" || row.kernel_method === "additive") ? row.kernel_method : null,
+      tooltip: `${row.kernel_method ? `[${row.kernel_method}] ` : ""}w=${row.w_interaction} · ${xLabel} ${xOf(row).toPrecision(4)} · loss ${row.mean_recon_loss_mean.toPrecision(4)} (mean of ${row.recording_count} recordings)`,
     }));
   }
   function buildBaselinePoint(
@@ -217,28 +255,72 @@
       tooltip: `Stratified baseline (η=${(baseline.selection_eta * 100).toFixed(0)}%) · ${xLabel} ${xMeanOf(baseline).toPrecision(4)} · loss ${baseline.mean_recon_loss_mean.toPrecision(4)} (mean of ${baseline.recording_count} recordings, IQR whiskers shown)`,
     };
   }
-  $: vendiChartPoints = buildChartPoints(operatingCurve, (row) => row.vendi_score_mean, vendiMin, vendiMax, "Vendi");
+  $: curveActive = curveKernel === "multiplicative" ? curveMultiplicative : curveAdditive;
+  $: curveShaded = curveKernel === "multiplicative" ? curveAdditive : curveMultiplicative;
+
+  $: vendiActivePoints = buildChartPoints(curveActive, (row) => row.vendi_score_mean, vendiMin, vendiMax, "Vendi");
+  $: vendiShadedPoints = buildChartPoints(curveShaded, (row) => row.vendi_score_mean, vendiMin, vendiMax, "Vendi");
   $: vendiBaselinePoint = buildBaselinePoint(
     effectiveBaseline, (row) => row.vendi_score_mean, (row) => row.vendi_score_q25, (row) => row.vendi_score_q75,
     vendiMin, vendiMax, "Vendi",
   );
-  $: cosineChartPoints = buildChartPoints(operatingCurve, (row) => row.mean_pairwise_cosine_mean, cosineMin, cosineMax, "cosine");
+  $: cosineActivePoints = buildChartPoints(curveActive, (row) => row.mean_pairwise_cosine_mean, cosineMin, cosineMax, "cosine");
+  $: cosineShadedPoints = buildChartPoints(curveShaded, (row) => row.mean_pairwise_cosine_mean, cosineMin, cosineMax, "cosine");
   $: cosineBaselinePoint = buildBaselinePoint(
     effectiveBaseline, (row) => row.mean_pairwise_cosine_mean, (row) => row.mean_pairwise_cosine_q25, (row) => row.mean_pairwise_cosine_q75,
     cosineMin, cosineMax, "cosine",
   );
-  $: atlasOperatingCurve = curveSummary
+
+  $: atlasMultiplicativeCurve = curveSummary
     .filter((row) => row.method === "dpp" && row.direction === atlasDppDirection &&
-      row.selection_eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === atlasDppKernel)
+      row.selection_eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === "multiplicative")
     .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0));
-  $: atlasVendiMin = atlasOperatingCurve.length ? Math.min(...atlasOperatingCurve.map((row) => row.vendi_score_mean)) : 0;
-  $: atlasVendiMax = atlasOperatingCurve.length ? Math.max(...atlasOperatingCurve.map((row) => row.vendi_score_mean)) : 1;
-  $: atlasLossMin = atlasOperatingCurve.length ? Math.min(...atlasOperatingCurve.map((row) => row.mean_recon_loss_mean)) : 0;
-  $: atlasLossMax = atlasOperatingCurve.length ? Math.max(...atlasOperatingCurve.map((row) => row.mean_recon_loss_mean)) : 1;
-  $: atlasVendiPoints = buildChartPoints(
-    atlasOperatingCurve, (row) => row.vendi_score_mean, atlasVendiMin, atlasVendiMax, "Vendi",
-    atlasLossMin, atlasLossMax, atlasWValue,
+  $: atlasAdditiveCurve = curveSummary
+    .filter((row) => row.method === "dpp" && row.direction === atlasDppDirection &&
+      row.selection_eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === "additive")
+    .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0));
+  $: atlasCombinedCurves = [...atlasMultiplicativeCurve, ...atlasAdditiveCurve];
+  $: atlasVendiMin = atlasCombinedCurves.length ? Math.min(...atlasCombinedCurves.map((row) => row.vendi_score_mean)) : 0;
+  $: atlasVendiMax = atlasCombinedCurves.length ? Math.max(...atlasCombinedCurves.map((row) => row.vendi_score_mean)) : 1;
+  $: atlasLossMin = atlasCombinedCurves.length ? Math.min(...atlasCombinedCurves.map((row) => row.mean_recon_loss_mean)) : 0;
+  $: atlasLossMax = atlasCombinedCurves.length ? Math.max(...atlasCombinedCurves.map((row) => row.mean_recon_loss_mean)) : 1;
+  $: atlasMultiplicativePoints = buildChartPoints(
+    atlasMultiplicativeCurve, (row) => row.vendi_score_mean, atlasVendiMin, atlasVendiMax, "Vendi",
+    atlasLossMin, atlasLossMax, atlasDppKernel === "multiplicative" ? atlasWValue : null,
   );
+  $: atlasAdditivePoints = buildChartPoints(
+    atlasAdditiveCurve, (row) => row.vendi_score_mean, atlasVendiMin, atlasVendiMax, "Vendi",
+    atlasLossMin, atlasLossMax, atlasDppKernel === "additive" ? atlasWValue : null,
+  );
+  $: atlasActivePoints = atlasDppKernel === "multiplicative" ? atlasMultiplicativePoints : atlasAdditivePoints;
+  $: atlasShadedPoints = atlasDppKernel === "multiplicative" ? atlasAdditivePoints : atlasMultiplicativePoints;
+
+  function selectAtlasPoint(point: ChartPoint): void {
+    if (point.kernel && point.kernel !== atlasDppKernel) {
+      atlasDppKernel = point.kernel;
+      const targetW = point.w;
+      const kernelRuns = runs.filter((run) =>
+        run.method === "dpp" &&
+        run.direction === atlasDppDirection &&
+        run.selection_eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) &&
+        run.kernel_method === point.kernel,
+      );
+      const wValues = [...new Set(kernelRuns.map((r) => r.w_interaction).filter((v): v is number => v !== null))].sort((a, b) => a - b);
+      if (targetW !== null) {
+        const idx = wValues.indexOf(targetW);
+        atlasWIndex = idx >= 0 ? idx : 0;
+      } else {
+        atlasWIndex = 0;
+      }
+      applyAtlasDppFilter();
+    } else {
+      if (point.w !== null) {
+        const idx = atlasWValues.indexOf(point.w);
+        if (idx >= 0) atlasWIndex = idx;
+      }
+      applyAtlasDppFilter();
+    }
+  }
 
   async function initialize(): Promise<void> {
     const wasm = await wasmConnector();
@@ -252,7 +334,7 @@
     if (!realMode) {
       await coordinator.exec(`
         CREATE OR REPLACE TABLE display_points AS
-        SELECT atlas_source.*, dataset_classes.task_modality, dataset_classes.domain, ${POINT_LABEL_SQL}
+        SELECT atlas_source.*, dataset_classes.task_modality, dataset_classes.domain, ${POINT_LABEL_SQL}, ${CHANNEL_GROUP_SQL}
         FROM atlas_source
         LEFT JOIN dataset_classes USING (dataset)
         WHERE hash(row_id) % 100 < 8
@@ -297,7 +379,7 @@
           AND NOT EXISTS (SELECT 1 FROM required_points WHERE required_points.row_id = atlas_source.row_id)
         LIMIT ${DISPLAY_SAMPLE_CAP}
       )
-      SELECT combined.*, dataset_classes.task_modality, dataset_classes.domain, ${POINT_LABEL_SQL} FROM (
+      SELECT combined.*, dataset_classes.task_modality, dataset_classes.domain, ${POINT_LABEL_SQL}, ${CHANNEL_GROUP_SQL} FROM (
         SELECT * FROM required_points
         UNION ALL
         SELECT * FROM sampled_points
@@ -391,21 +473,92 @@
           <p class="rail-copy">Switch among precomputed rankings and diversity selections.</p>
           <div class="rail-tabs" role="tablist" aria-label="Atlas side-panel view">
             <button type="button" role="tab" class:active={railTab === "explore"} aria-selected={railTab === "explore"} onclick={() => railTab = "explore"}>Explore</button>
-            <button type="button" role="tab" class:active={railTab === "curves"} aria-selected={railTab === "curves"} disabled={operatingCurve.length <= 1} onclick={() => railTab = "curves"}>Operating curves</button>
+            <button type="button" role="tab" class:active={railTab === "curves"} aria-selected={railTab === "curves"} disabled={curveMultiplicative.length <= 1 && curveAdditive.length <= 1} onclick={() => railTab = "curves"}>Operating curves</button>
           </div>
           {#if railTab === "explore"}
             <p class="display-note">Display cap: about 2M points; all selection members are retained.</p>
             <p class="explore-note">Filter the stable atlas by any precomputed DPP selection. These controls preserve the canvas and combine with the atlas charts.</p>
-            {#if atlasVendiPoints.length > 1}
+            {#if atlasMultiplicativePoints.length > 1 || atlasAdditivePoints.length > 1}
               <div class="mini-curve">
-                <div class="mini-curve-header"><h3>Vendi diversity / loss</h3><span>{atlasWValue === null ? "" : `w=${atlasWValue}`}</span></div>
-                <svg viewBox="0 0 420 198" role="img" aria-label="Vendi diversity versus mean reconstruction loss for the current atlas DPP configuration">
-                  <line x1={CHART_LEFT} y1={CHART_TOP} x2={CHART_LEFT} y2={CHART_BOTTOM} />
-                  <line x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} />
-                  <polyline points={atlasVendiPoints.map((point) => `${point.x},${point.y}`).join(" ")} />
-                  {#each atlasVendiPoints as point}
-                    <circle class:current={point.current} cx={point.x} cy={point.y} r={point.r}><title>{point.tooltip}</title></circle>
-                  {/each}
+                <div class="mini-curve-header">
+                  <h3>Vendi diversity / loss</h3>
+                  <span class="mini-curve-w">{atlasWValue === null ? "" : `w=${atlasWValue}`}</span>
+                </div>
+                <div class="mini-curve-legend">
+                  <button
+                    type="button"
+                    class="kernel-chip"
+                    class:active={atlasDppKernel === "multiplicative"}
+                    onclick={() => { if (atlasDppKernel !== "multiplicative") { atlasDppKernel = "multiplicative"; applyAtlasDppFilter(true); } }}
+                    title="Select multiplicative kernel"
+                  >
+                    <span class="chip-swatch multiplicative" class:active={atlasDppKernel === "multiplicative"}></span>
+                    <span>Multiplicative</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="kernel-chip"
+                    class:active={atlasDppKernel === "additive"}
+                    onclick={() => { if (atlasDppKernel !== "additive") { atlasDppKernel = "additive"; applyAtlasDppFilter(true); } }}
+                    title="Select additive kernel"
+                  >
+                    <span class="chip-swatch additive" class:active={atlasDppKernel === "additive"}></span>
+                    <span>Additive</span>
+                  </button>
+                </div>
+                <svg viewBox="0 0 420 270" role="img" aria-label="Vendi diversity versus mean reconstruction loss comparing multiplicative and additive DPP configurations">
+                  <line class="axis-line" x1={CHART_LEFT} y1={CHART_TOP} x2={CHART_LEFT} y2={CHART_BOTTOM} />
+                  <line class="axis-line" x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} />
+
+                  <!-- Axis ticks and numerical values -->
+                  <line class="axis-tick" x1={CHART_LEFT - 3} y1={CHART_TOP} x2={CHART_LEFT} y2={CHART_TOP} />
+                  <text class="axis-val y-val" x={CHART_LEFT - 5} y={CHART_TOP + 4} text-anchor="end">{atlasLossMax.toFixed(2)}</text>
+                  <line class="axis-tick" x1={CHART_LEFT - 3} y1={CHART_BOTTOM} x2={CHART_LEFT} y2={CHART_BOTTOM} />
+                  <text class="axis-val y-val" x={CHART_LEFT - 5} y={CHART_BOTTOM} text-anchor="end">{atlasLossMin.toFixed(2)}</text>
+
+                  <line class="axis-tick" x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_LEFT} y2={CHART_BOTTOM + 3} />
+                  <text class="axis-val x-val" x={CHART_LEFT} y={CHART_BOTTOM + 14} text-anchor="start">{atlasVendiMin.toFixed(1)}</text>
+                  <line class="axis-tick" x1={CHART_RIGHT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM + 3} />
+                  <text class="axis-val x-val" x={CHART_RIGHT} y={CHART_BOTTOM + 14} text-anchor="end">{atlasVendiMax.toFixed(1)}</text>
+
+                  <!-- Shaded curve (unselected kernel) -->
+                  {#if atlasShadedPoints.length > 1}
+                    <polyline
+                      class="mini-curve-line shaded {atlasDppKernel === 'multiplicative' ? 'additive' : 'multiplicative'}"
+                      points={atlasShadedPoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                    />
+                    {#each atlasShadedPoints as point}
+                      <!-- svelte-ignore a11y_click_events_have_key_events -->
+                      <!-- svelte-ignore a11y_no_static_element_interactions -->
+                      <circle
+                        class="mini-curve-point shaded {atlasDppKernel === 'multiplicative' ? 'additive' : 'multiplicative'}"
+                        cx={point.x}
+                        cy={point.y}
+                        r="3.5"
+                        onclick={() => selectAtlasPoint(point)}
+                      ><title>{point.tooltip} (shaded — click to select)</title></circle>
+                    {/each}
+                  {/if}
+
+                  <!-- Active curve (selected kernel) -->
+                  {#if atlasActivePoints.length > 1}
+                    <polyline
+                      class="mini-curve-line active {atlasDppKernel}"
+                      points={atlasActivePoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                    />
+                    {#each atlasActivePoints as point}
+                      <!-- svelte-ignore a11y_click_events_have_key_events -->
+                      <!-- svelte-ignore a11y_no_static_element_interactions -->
+                      <circle
+                        class="mini-curve-point active {atlasDppKernel}"
+                        class:current={point.current}
+                        cx={point.x}
+                        cy={point.y}
+                        r={point.r}
+                        onclick={() => selectAtlasPoint(point)}
+                      ><title>{point.tooltip}</title></circle>
+                    {/each}
+                  {/if}
                 </svg>
                 <div class="axis-labels"><span>Vendi diversity →</span><span>loss ↑</span></div>
               </div>
@@ -413,7 +566,7 @@
             <div class="control-stack dpp-controls">
               <label>Points<select bind:value={atlasDppMode} onchange={() => applyAtlasDppFilter()}><option value="all">All points</option><option value="selected">Selected only</option></select></label>
               <div class="compact-controls">
-                <label>Direction<select bind:value={atlasDppDirection} onchange={() => applyAtlasDppFilter(true)}><option value="top">Top loss</option><option value="bottom">Bottom loss</option></select></label>
+                <label>Direction<select bind:value={atlasDppDirection} onchange={() => applyAtlasDppFilter(true)}><option value="bottom">Bottom loss</option><option value="top">Top loss</option></select></label>
                 <label>Candidate pool<select bind:value={atlasDppEta} onchange={() => applyAtlasDppFilter(true)}><option value="eta_010">10%</option><option value="eta_001">1%</option></select></label>
               </div>
               <label>Kernel<select bind:value={atlasDppKernel} onchange={() => applyAtlasDppFilter(true)}><option value="multiplicative">Multiplicative</option><option value="additive">Additive</option></select></label>
@@ -430,24 +583,74 @@
             <h2>Operating curves</h2>
             <p class="view-note">Curve controls are independent from the atlas selection filters.</p>
             <div class="curve-controls">
-              <label>Direction<select bind:value={curveDirection}><option value="top">Top loss</option><option value="bottom">Bottom loss</option></select></label>
+              <label>Direction<select bind:value={curveDirection}><option value="bottom">Bottom loss</option><option value="top">Top loss</option></select></label>
               <label>Candidate pool<select bind:value={curveEta}><option value="eta_010">10% per recording</option><option value="eta_001">1% per recording</option></select></label>
               <label>Kernel<select bind:value={curveKernel}><option value="multiplicative">Multiplicative</option><option value="additive">Additive</option></select></label>
             </div>
-              {#snippet operatingCurveChart(title: string, points: ChartPoint[], baselinePoint: BaselinePoint | null, xAxisLabel: string, note: string)}
+              {#snippet operatingCurveChart(
+                title: string,
+                points: ChartPoint[],
+                shaded: ChartPoint[],
+                baselinePoint: BaselinePoint | null,
+                xAxisLabel: string,
+                note: string,
+                xMinVal: number,
+                xMaxVal: number,
+                xDecimals = 1,
+              )}
               <div class="tradeoff">
                 <h4>{title} / loss</h4>
-                <svg viewBox="0 0 420 198" role="img" aria-label="{title} versus mean reconstruction loss: DPP operating curve versus stratified baseline, aggregated across recordings">
-                  <line x1={CHART_LEFT} y1={CHART_TOP} x2={CHART_LEFT} y2={CHART_BOTTOM} />
-                  <line x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} />
+                <svg viewBox="0 0 420 270" role="img" aria-label="{title} versus mean reconstruction loss comparing multiplicative and additive kernels versus stratified baseline">
+                  <line class="axis-line" x1={CHART_LEFT} y1={CHART_TOP} x2={CHART_LEFT} y2={CHART_BOTTOM} />
+                  <line class="axis-line" x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} />
+
+                  <!-- Axis ticks and numerical values -->
+                  <line class="axis-tick" x1={CHART_LEFT - 3} y1={CHART_TOP} x2={CHART_LEFT} y2={CHART_TOP} />
+                  <text class="axis-val y-val" x={CHART_LEFT - 5} y={CHART_TOP + 4} text-anchor="end">{lossMax.toFixed(2)}</text>
+                  <line class="axis-tick" x1={CHART_LEFT - 3} y1={CHART_BOTTOM} x2={CHART_LEFT} y2={CHART_BOTTOM} />
+                  <text class="axis-val y-val" x={CHART_LEFT - 5} y={CHART_BOTTOM} text-anchor="end">{lossMin.toFixed(2)}</text>
+
+                  <line class="axis-tick" x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_LEFT} y2={CHART_BOTTOM + 3} />
+                  <text class="axis-val x-val" x={CHART_LEFT} y={CHART_BOTTOM + 14} text-anchor="start">{xMinVal.toFixed(xDecimals)}</text>
+                  <line class="axis-tick" x1={CHART_RIGHT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM + 3} />
+                  <text class="axis-val x-val" x={CHART_RIGHT} y={CHART_BOTTOM + 14} text-anchor="end">{xMaxVal.toFixed(xDecimals)}</text>
+
                   {#if baselinePoint}
                     <line class="baseline-guide" x1={CHART_LEFT} y1={baselinePoint.y} x2={CHART_RIGHT} y2={baselinePoint.y} />
                     <line class="baseline-guide" x1={baselinePoint.x} y1={CHART_TOP} x2={baselinePoint.x} y2={CHART_BOTTOM} />
                   {/if}
-                  <polyline class="curve-line" points={points.map((point) => `${point.x},${point.y}`).join(" ")} />
+
+                  <!-- Shaded curve (unselected kernel) -->
+                  {#if shaded.length > 1}
+                    <polyline
+                      class="curve-line shaded {curveKernel === 'multiplicative' ? 'additive' : 'multiplicative'}"
+                      points={shaded.map((point) => `${point.x},${point.y}`).join(" ")}
+                    />
+                    {#each shaded as point}
+                      <circle
+                        class="curve-point shaded {curveKernel === 'multiplicative' ? 'additive' : 'multiplicative'}"
+                        cx={point.x}
+                        cy={point.y}
+                        r="3"
+                      ><title>{point.tooltip} (shaded — switch kernel to inspect)</title></circle>
+                    {/each}
+                  {/if}
+
+                  <!-- Active curve (selected kernel) -->
+                  <polyline
+                    class="curve-line active {curveKernel}"
+                    points={points.map((point) => `${point.x},${point.y}`).join(" ")}
+                  />
                   {#each points as point}
-                    <circle class="curve-point" class:current={point.current} cx={point.x} cy={point.y} r={point.r}><title>{point.tooltip}</title></circle>
+                    <circle
+                      class="curve-point active {curveKernel}"
+                      class:current={point.current}
+                      cx={point.x}
+                      cy={point.y}
+                      r={point.r}
+                    ><title>{point.tooltip}</title></circle>
                   {/each}
+
                   {#if baselinePoint}
                     <line class="baseline-whisker" x1={baselinePoint.xLo} y1={baselinePoint.y} x2={baselinePoint.xHi} y2={baselinePoint.y} />
                     <line class="baseline-whisker" x1={baselinePoint.x} y1={baselinePoint.yLo} x2={baselinePoint.x} y2={baselinePoint.yHi} />
@@ -462,13 +665,22 @@
                 </svg>
                 <div class="axis-labels"><span>{xAxisLabel}</span><span>loss ↑</span></div>
                 <ul class="legend">
-                  <li><span class="swatch curve"></span>DPP sweep ({curveKernel})</li>
-                  {#if baselinePoint}<li><span class="swatch baseline"></span>Stratified baseline</li>{/if}
+                  <li>
+                    <span class="swatch curve active {curveKernel}"></span>
+                    <span>DPP sweep ({curveKernel})</span>
+                  </li>
+                  <li>
+                    <span class="swatch curve shaded {curveKernel === 'multiplicative' ? 'additive' : 'multiplicative'}"></span>
+                    <span class="shaded-label">DPP sweep ({curveKernel === 'multiplicative' ? 'additive' : 'multiplicative'})</span>
+                  </li>
+                  {#if baselinePoint}
+                    <li><span class="swatch baseline"></span>Stratified baseline</li>
+                  {/if}
                 </ul>
                 <small>{note}</small>
               </div>
               {/snippet}
-              {#if operatingCurve.length > 1}
+              {#if curveMultiplicative.length > 1 || curveAdditive.length > 1}
                 <div class="tradeoff-group">
                   <div class="tradeoff-header">
                     <h3>Operating curves</h3>
@@ -478,17 +690,25 @@
                   </div>
                   {@render operatingCurveChart(
                     "Vendi diversity",
-                    vendiChartPoints,
+                    vendiActivePoints,
+                    vendiShadedPoints,
                     vendiBaselinePoint,
                     "Vendi diversity →",
                     curveKernel === "multiplicative" ? "Higher w emphasizes ranking utility." : "Higher w emphasizes interaction/diversity.",
+                    vendiMin,
+                    vendiMax,
+                    1,
                   )}
                   {@render operatingCurveChart(
                     "Cosine similarity",
-                    cosineChartPoints,
+                    cosineActivePoints,
+                    cosineShadedPoints,
                     cosineBaselinePoint,
                     "← more diverse · cosine similarity · less diverse →",
                     "Mean pairwise cosine of selected rows; lower means more diverse.",
+                    cosineMin,
+                    cosineMax,
+                    2,
                   )}
                   {#if strataBaseline}<small class="baseline-note">Baseline whiskers show the interquartile range across recordings.</small>{/if}
                 </div>
@@ -507,6 +727,11 @@
               ? ["recon_loss", "dataset", "n_channels", "modality", "task_modality", "domain", "big_recording_index"]
               : ["recon_loss", "dataset", "n_channels", "modality", "task_modality", "domain"],
             override: {
+              n_channels: {
+                type: "predicates",
+                title: "Channels",
+                items: CHANNEL_PREDICATE_ITEMS,
+              },
               modality: {
                 type: "predicates",
                 title: "Modality",
@@ -551,6 +776,8 @@
     --hero-text: #202d91;
     --accent: #5665ff;
     --accent-strong: #4c5cf4;
+    --curve-additive: #0284c7;
+    --curve-shaded: #94a3b8;
     --curve-baseline: #008300;
     --shadow: rgb(22 32 51 / 12%);
     --status-card-bg: rgb(255 255 255 / 92%);
@@ -576,6 +803,8 @@
       --hero-text: #b9c1ff;
       --accent: #7c86ff;
       --accent-strong: #6672ff;
+      --curve-additive: #38bdf8;
+      --curve-shaded: #64748b;
       --shadow: rgb(0 0 0 / 45%);
       --status-card-bg: rgb(24 27 38 / 92%);
       --run-id-text: #838da3;
@@ -616,12 +845,32 @@
   .mini-curve { margin-bottom: 1rem; padding: 0.65rem; border: 1px solid var(--border); border-radius: 0.55rem; background: var(--input-disabled-bg); }
   .mini-curve-header { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
   .mini-curve-header h3 { margin: 0; }
-  .mini-curve-header span { color: var(--hero-text); font-size: 0.7rem; font-weight: 650; }
-  .mini-curve svg { display: block; width: 100%; height: auto; aspect-ratio: 420 / 198; }
-  .mini-curve line { stroke: var(--input-border); stroke-width: 1; }
-  .mini-curve polyline { fill: none; stroke: var(--accent); stroke-width: 2; }
-  .mini-curve circle { fill: var(--accent); }
-  .mini-curve circle.current { fill: var(--eyebrow); stroke: var(--panel-bg); stroke-width: 2; }
+  .mini-curve-header .mini-curve-w { color: var(--hero-text); font-size: 0.7rem; font-weight: 650; }
+  .mini-curve-legend { display: flex; gap: 0.35rem; margin: 0.4rem 0 0.35rem; }
+  .kernel-chip { display: inline-flex; align-items: center; gap: 0.35rem; margin: 0; padding: 0.18rem 0.45rem; border: 1px solid var(--input-border); border-radius: 0.35rem; background: var(--input-bg); color: var(--text-faint); opacity: 0.55; font-size: 0.65rem; font-weight: 500; cursor: pointer; transition: all 0.15s ease; }
+  .kernel-chip:hover { border-color: var(--text-soft); color: var(--heading); opacity: 0.85; }
+  .kernel-chip.active { border-color: var(--accent); background: var(--hero-bg); color: var(--hero-text); opacity: 1; font-weight: 650; }
+  .chip-swatch { display: inline-block; width: 0.45rem; height: 0.45rem; border-radius: 0.12rem; background: var(--curve-shaded); opacity: 0.3; transition: all 0.15s ease; }
+  .chip-swatch.active.multiplicative { background: var(--accent); opacity: 1; }
+  .chip-swatch.active.additive { background: var(--curve-additive); opacity: 1; }
+
+  .mini-curve svg { display: block; width: 100%; height: auto; aspect-ratio: 420 / 270; overflow: visible; }
+  .mini-curve line.axis-line { stroke: var(--input-border); stroke-width: 1; }
+  .mini-curve line.axis-tick { stroke: var(--input-border); stroke-width: 1; }
+  .mini-curve text.axis-val { fill: var(--text-faint); font-size: 0.62rem; font-family: inherit; font-variant-numeric: tabular-nums; user-select: none; }
+
+  .mini-curve polyline.mini-curve-line { fill: none; }
+  .mini-curve polyline.mini-curve-line.active.multiplicative { stroke: var(--accent); stroke-width: 2; }
+  .mini-curve polyline.mini-curve-line.active.additive { stroke: var(--curve-additive); stroke-width: 2; }
+  .mini-curve polyline.mini-curve-line.shaded { stroke: var(--curve-shaded); stroke-width: 1.25; stroke-dasharray: 3 3; opacity: 0.2; transition: opacity 0.15s ease; }
+  .mini-curve:hover polyline.mini-curve-line.shaded { opacity: 0.32; }
+
+  .mini-curve circle.mini-curve-point.active.multiplicative { fill: var(--accent); cursor: pointer; }
+  .mini-curve circle.mini-curve-point.active.additive { fill: var(--curve-additive); cursor: pointer; }
+  .mini-curve circle.mini-curve-point.active.current { fill: var(--eyebrow); stroke: var(--panel-bg); stroke-width: 2; cursor: pointer; }
+  .mini-curve circle.mini-curve-point.shaded { fill: var(--curve-shaded); opacity: 0.2; cursor: pointer; transition: all 0.15s ease; }
+  .mini-curve circle.mini-curve-point.shaded:hover { fill: var(--text-soft); opacity: 0.75; }
+
   .tradeoff-group { margin-top: 1.25rem; }
   .tradeoff-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
   .tradeoff-header h3 { margin: 0; }
@@ -630,18 +879,30 @@
   .baseline-note { display: block; margin-top: 0.35rem; }
   .tradeoff { margin-top: 0.75rem; }
   .tradeoff h4 { margin: 0 0 0.3rem; color: var(--text-muted); font-size: 0.68rem; font-weight: 600; text-transform: none; }
-  .tradeoff svg { display: block; width: 100%; height: auto; aspect-ratio: 420 / 198; overflow: visible; }
-  .tradeoff line { stroke: var(--input-border); stroke-width: 1; }
+  .tradeoff svg { display: block; width: 100%; height: auto; aspect-ratio: 420 / 270; overflow: visible; }
+  .tradeoff line.axis-line { stroke: var(--input-border); stroke-width: 1; }
+  .tradeoff line.axis-tick { stroke: var(--input-border); stroke-width: 1; }
+  .tradeoff text.axis-val { fill: var(--text-faint); font-size: 0.62rem; font-family: inherit; font-variant-numeric: tabular-nums; user-select: none; }
   .tradeoff line.baseline-guide { stroke: var(--curve-baseline); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0.55; }
   .tradeoff line.baseline-whisker { stroke: var(--curve-baseline); stroke-width: 1.25; }
-  .tradeoff polyline.curve-line { fill: none; stroke: var(--accent); stroke-width: 1.5; }
-  .tradeoff circle.curve-point { fill: var(--accent); }
-  .tradeoff circle.curve-point.current { fill: var(--eyebrow); stroke: var(--panel-bg); stroke-width: 1.5; }
+  .tradeoff polyline.curve-line { fill: none; }
+  .tradeoff polyline.curve-line.active.multiplicative { stroke: var(--accent); stroke-width: 1.75; }
+  .tradeoff polyline.curve-line.active.additive { stroke: var(--curve-additive); stroke-width: 1.75; }
+  .tradeoff polyline.curve-line.shaded { stroke: var(--curve-shaded); stroke-width: 1.25; stroke-dasharray: 3 3; opacity: 0.2; transition: opacity 0.15s ease; }
+  .tradeoff:hover polyline.curve-line.shaded { opacity: 0.32; }
+  .tradeoff circle.curve-point.active.multiplicative { fill: var(--accent); }
+  .tradeoff circle.curve-point.active.additive { fill: var(--curve-additive); }
+  .tradeoff circle.curve-point.active.current { fill: var(--eyebrow); stroke: var(--panel-bg); stroke-width: 1.5; }
+  .tradeoff circle.curve-point.shaded { fill: var(--curve-shaded); opacity: 0.2; cursor: pointer; transition: all 0.15s ease; }
+  .tradeoff circle.curve-point.shaded:hover { fill: var(--text-soft); opacity: 0.75; }
   .tradeoff rect.baseline-marker { fill: var(--curve-baseline); stroke: var(--panel-bg); stroke-width: 1; }
   .tradeoff .legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0.5rem 0 0.35rem; padding: 0; list-style: none; color: var(--text-muted); font-size: 0.65rem; }
   .tradeoff .legend li { display: flex; align-items: center; gap: 0.3rem; }
   .tradeoff .swatch { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 0.15rem; }
-  .tradeoff .swatch.curve { background: var(--accent); }
+  .tradeoff .swatch.curve.multiplicative { background: var(--accent); }
+  .tradeoff .swatch.curve.additive { background: var(--curve-additive); }
+  .tradeoff .swatch.shaded { background: var(--curve-shaded); opacity: 0.25; }
+  .tradeoff .shaded-label { color: var(--text-faint); opacity: 0.65; }
   .tradeoff .swatch.baseline { background: var(--curve-baseline); transform: rotate(45deg); }
   .axis-labels { display: flex; justify-content: space-between; }
   .status { box-sizing: border-box; display: grid; width: 100%; height: 100%; place-items: center; padding: 2rem; background: radial-gradient(circle at 20% 20%, rgb(86 101 255 / 14%), transparent 32rem), radial-gradient(circle at 80% 70%, rgb(34 197 175 / 12%), transparent 28rem), var(--bg); }
