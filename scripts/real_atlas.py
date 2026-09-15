@@ -14,7 +14,7 @@ import os
 import platform
 import re
 import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -271,6 +271,21 @@ def vendi_score(similarity: np.ndarray, tolerance: float = 1.0e-7) -> float:
     return min(float(matrix.shape[0]), max(1.0, score))
 
 
+def mean_pairwise_cosine(similarity: np.ndarray) -> float:
+    """Return the mean off-diagonal cosine similarity for a selected set."""
+    matrix = np.asarray(similarity, dtype=np.float64)
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1] or matrix.shape[0] == 0:
+        raise AtlasDataError("Mean pairwise cosine requires a non-empty square similarity matrix")
+    size = matrix.shape[0]
+    if size == 1:
+        return 1.0
+    off_diagonal_sum = float(np.sum(matrix) - np.trace(matrix))
+    score = off_diagonal_sum / float(size * (size - 1))
+    if not math.isfinite(score):
+        raise AtlasDataError("Mean pairwise cosine is non-finite")
+    return score
+
+
 def build_kernel(
     similarity: np.ndarray, utility: np.ndarray, method: str, interaction: float, epsilon: float
 ) -> np.ndarray:
@@ -299,54 +314,104 @@ def _stable_marginal(kernel: np.ndarray, selected: list[int], candidate: int, ep
     return max(float(kernel[candidate, candidate]) - correction, epsilon)
 
 
-def _stable_marginals(kernel: np.ndarray, selected: list[int], choices: list[int], epsilon: float) -> np.ndarray:
-    if not selected:
-        return np.maximum(np.asarray(kernel[choices, choices], dtype=np.float64), epsilon)
-    sub = kernel[np.ix_(selected, selected)]
-    sub = (sub + sub.T) * 0.5
-    sub[np.diag_indices_from(sub)] += epsilon
-    cross = kernel[np.ix_(selected, choices)]
-    try:
-        solved = np.linalg.solve(sub, cross)
-    except np.linalg.LinAlgError:
-        solved = np.linalg.pinv(sub) @ cross
-    residual = np.diag(kernel[np.ix_(choices, choices)]) - np.sum(cross * solved, axis=0)
-    return np.maximum(residual, epsilon)
+def _greedy_select(
+    diagonal: np.ndarray, row_fn: Callable[[int], np.ndarray], selection_k: int, epsilon: float
+) -> tuple[list[int], list[float]]:
+    """Core single-start incremental-Cholesky greedy selection.
+
+    ``row_fn(i)`` must return a fresh, safely-mutable float64 array holding
+    kernel row ``i`` (length ``len(diagonal)``) — this function updates it
+    in place, so a row_fn backed by a view into shared storage must copy
+    before returning. It is called once per selection step, so it never needs
+    the full n x n kernel materialized up front (see ``greedy_map_lazy``,
+    which computes rows on demand from the similarity matrix instead).
+    """
+    candidate_count = int(diagonal.shape[0])
+    if not 0 < selection_k <= candidate_count:
+        raise AtlasDataError(f"selection_k={selection_k} must be in [1, {candidate_count}]")
+    residual = np.asarray(diagonal, dtype=np.float64).copy()
+    factors = np.zeros((selection_k, candidate_count), dtype=np.float64)
+    selected_mask = np.zeros(candidate_count, dtype=bool)
+    selected: list[int] = []
+    gains: list[float] = []
+    for step in range(selection_k):
+        scores = np.where(selected_mask, -np.inf, residual)
+        winner = int(np.argmax(scores))
+        pivot_value = max(float(residual[winner]), epsilon)
+        pivot = math.sqrt(pivot_value)
+        row = np.asarray(row_fn(winner), dtype=np.float64)
+        if step:
+            row -= factors[:step, :].T @ factors[:step, winner]
+        row /= pivot
+        factors[step, :] = row
+        residual -= row * row
+        selected_mask[winner] = True
+        selected.append(winner)
+        gains.append(float(np.log(max(pivot * pivot, epsilon))))
+    return selected, gains
+
 
 def greedy_map(kernel: np.ndarray, selection_k: int, epsilon: float) -> tuple[list[int], list[float], float]:
-    """D5P4-style all-start greedy MAP with deterministic CPU tie handling."""
+    """Single-start greedy MAP-DPP selection using incremental Cholesky updates.
+
+    O(n*k^2) via rank-1 residual updates (Chen, Zhang & Avron 2018,
+    https://github.com/laming-chen/fast-map-dpp), matching the intent of the
+    single-start reference in
+    https://github.com/jonathanlys01/d3p2/blob/main/src/d5p4/subsample/_greedy_map.py
+    (that file's own ``fast_greedy_map`` masks the pivot to -inf before reading
+    it back as the normalizer on the next step, which poisons every
+    subsequent update with NaN; it is only ever exercised from a ``timeit``
+    call, never checked for correctness, so this reimplements the same
+    algorithm without that bug rather than porting it verbatim).
+    """
     candidate_count = int(kernel.shape[0])
     if kernel.ndim != 2 or kernel.shape[1] != candidate_count:
         raise AtlasDataError("DPP kernel must be square")
-    if not 0 < selection_k <= candidate_count:
-        raise AtlasDataError(f"selection_k={selection_k} must be in [1, {candidate_count}]")
-    best_order: list[int] | None = None
-    best_gains: list[float] | None = None
-    best_logdet = -math.inf
-    for initial in range(candidate_count):
-        selected = [initial]
-        gains = [float(np.log(max(kernel[initial, initial], epsilon)))]
-        while len(selected) < selection_k:
-            selected_set = set(selected)
-            choices = [candidate for candidate in range(candidate_count) if candidate not in selected_set]
-            marginal = _stable_marginals(kernel, selected, choices, epsilon)
-            winner_position = int(np.argmax(marginal))
-            winner = choices[winner_position]
-            selected.append(winner)
-            gains.append(float(np.log(marginal[winner_position])))
-        final = kernel[np.ix_(selected, selected)]
-        sign, logdet = np.linalg.slogdet((final + final.T) * 0.5 + epsilon * np.eye(selection_k))
-        if sign <= 0 or not math.isfinite(float(logdet)):
-            raise AtlasDataError("DPP kernel produced a non-positive final determinant")
-        order_key = tuple(selected)
-        if float(logdet) > best_logdet + 1.0e-12 or (
-            abs(float(logdet) - best_logdet) <= 1.0e-12 and (best_order is None or order_key < tuple(best_order))
-        ):
-            best_order = selected
-            best_gains = gains
-            best_logdet = float(logdet)
-    assert best_order is not None and best_gains is not None
-    return best_order, best_gains, best_logdet
+    kernel = np.asarray(kernel, dtype=np.float64)
+    selected, gains = _greedy_select(np.diag(kernel), lambda i: kernel[i, :].copy(), selection_k, epsilon)
+    final = kernel[np.ix_(selected, selected)]
+    sign, logdet = np.linalg.slogdet((final + final.T) * 0.5 + epsilon * np.eye(selection_k))
+    if sign <= 0 or not math.isfinite(float(logdet)):
+        raise AtlasDataError("DPP kernel produced a non-positive final determinant")
+    return selected, gains, float(logdet)
+
+
+def greedy_map_lazy(
+    similarity: np.ndarray, utility: np.ndarray, method: str, interaction: float, selection_k: int, epsilon: float
+) -> tuple[list[int], list[float], float]:
+    """Same result as ``greedy_map(build_kernel(similarity, utility, method, interaction, epsilon), ...)``,
+    without ever materializing the full n x n kernel matrix.
+
+    ``build_kernel`` is O(n^2) and was being rebuilt from scratch once per
+    sweep point (31 times per recording) even though the greedy selection only
+    ever reads it one row at a time. Both kernel methods are simple, cheaply
+    row-computable transforms of ``similarity``, so this computes rows on
+    demand instead; the final log-determinant still only needs the small
+    selected-by-selected submatrix, built with the existing ``build_kernel``
+    at O(k^2) cost.
+    """
+    if method == "multiplicative":
+        weights = np.exp(float(interaction) * (utility - float(np.max(utility))))
+        diagonal = (weights**2) * np.diag(similarity)
+
+        def row_fn(i: int) -> np.ndarray:
+            return weights[i] * similarity[i, :] * weights
+    elif method == "additive":
+        diagonal = utility + epsilon + float(interaction) * np.diag(similarity)
+
+        def row_fn(i: int) -> np.ndarray:
+            row = float(interaction) * similarity[i, :]
+            row[i] += utility[i] + epsilon
+            return row
+    else:
+        raise AtlasDataError(f"Unknown DPP kernel method: {method}")
+
+    selected, gains = _greedy_select(diagonal, row_fn, selection_k, epsilon)
+    final = build_kernel(similarity[np.ix_(selected, selected)], utility[selected], method, interaction, epsilon)
+    sign, logdet = np.linalg.slogdet((final + final.T) * 0.5 + epsilon * np.eye(selection_k))
+    if sign <= 0 or not math.isfinite(float(logdet)):
+        raise AtlasDataError("DPP kernel produced a non-positive final determinant")
+    return selected, gains, float(logdet)
 
 
 def workspace_bytes(candidate_k: int, selection_k: int, embedding_dim: int = 512) -> int:
