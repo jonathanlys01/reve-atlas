@@ -2,461 +2,1105 @@
     {
         "dataset": "AlexMI",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Motor Imagery",
+        "timing": "Active, Asynchronous",
+        "population_age": "AgeUnknown",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "BI2014a",
         "task_modality": "Visual",
-        "domain": "BCI, Evoked Response"
+        "domain": "BCI, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, Attention",
+        "timing": "Reactive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "dry"
     },
     {
         "dataset": "BI2014b",
         "task_modality": "Visual",
-        "domain": "BCI, Evoked Response"
+        "domain": "BCI, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, Attention",
+        "timing": "Reactive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "dry"
     },
     {
         "dataset": "BI2015a",
         "task_modality": "Visual",
-        "domain": "BCI, Evoked Response"
+        "domain": "BCI, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, Attention",
+        "timing": "Reactive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "dry"
     },
     {
         "dataset": "BI2015b",
         "task_modality": "Visual",
-        "domain": "BCI, Evoked Response"
+        "domain": "BCI, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, Attention",
+        "timing": "Reactive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "dry"
     },
     {
         "dataset": "BNCI2014_001",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "BNCI2014_004",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "BNCI2014_008",
         "task_modality": "Visual",
-        "domain": "BCI, Evoked Response, Clinical"
+        "domain": "BCI, Evoked Response, Clinical",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "BNCI2014_009",
         "task_modality": "Visual",
-        "domain": "BCI, Evoked Response"
+        "domain": "BCI, Evoked Response",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "BNCI2015_001",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "BNCI2015_003",
         "task_modality": "Auditory",
-        "domain": "BCI, Evoked Response"
+        "domain": "BCI, Evoked Response",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "BNCI2015_004",
         "task_modality": "Cognitive",
-        "domain": "BCI, Cognitive"
+        "domain": "BCI, Cognitive",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "Cho2017",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Motor Imagery",
+        "timing": "Active, Asynchronous",
+        "population_age": "AgeUnknown",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "EPFLP300",
         "task_modality": "Visual",
-        "domain": "BCI, Evoked Response, Clinical"
+        "domain": "BCI, Evoked Response, Clinical",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "ICARE",
         "task_modality": "Clinical",
-        "domain": "Clinical"
+        "domain": "Clinical",
+        "task_structure": "No",
+        "stimulation": "No",
+        "task": "No task",
+        "timing": "Passive",
+        "population_age": "Adult",
+        "population_health": "Unhealthy, Cardiac",
+        "electrode_type": "wet"
     },
     {
         "dataset": "Inria_Large",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Motor Imagery",
+        "timing": "Active, Asynchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "Kalunga2016",
         "task_modality": "Visual",
-        "domain": "BCI, Evoked Response"
+        "domain": "BCI, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, Attention",
+        "timing": "Reactive, Synchronous",
+        "population_age": "AgeUnknown",
+        "population_health": "Healthy",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "Lee2019_ERP",
         "task_modality": "Visual",
-        "domain": "BCI, Evoked Response"
+        "domain": "BCI, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, Attention",
+        "timing": "Reactive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "Lee2019_MI",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Motor Imagery",
+        "timing": "Active, Asynchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "Lee2019_SSVEP",
         "task_modality": "Visual",
-        "domain": "BCI, Evoked Response"
+        "domain": "BCI, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, Attention",
+        "timing": "Reactive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "Liu2024",
         "task_modality": "Motor",
-        "domain": "BCI, Clinical"
+        "domain": "BCI, Clinical",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Motor Imagery",
+        "timing": "Active, Asynchronous",
+        "population_age": "Adult",
+        "population_health": "Unhealthy, Stroke",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "NMT",
         "task_modality": "Clinical",
-        "domain": "Clinical"
+        "domain": "Clinical",
+        "task_structure": "No",
+        "stimulation": "No",
+        "task": "No task",
+        "timing": null,
+        "population_age": "Adult, Child",
+        "population_health": "Healthy, Unhealthy",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "Nakanishi2015",
         "task_modality": "Visual",
-        "domain": "BCI, Evoked Response"
+        "domain": "BCI, Evoked Response",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "ON_ds001787",
         "task_modality": "Auditory",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "MultiTask",
+        "stimulation": "No",
+        "task": "Meditation",
+        "timing": "Passive, Asynchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds002680",
         "task_modality": "Visual, Motor",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual",
+        "task": "ReactionTime, PerceptionVisual, Attention, DecisionMaking",
+        "timing": "Reactive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds002721",
         "task_modality": "Auditory",
-        "domain": "Cognitive, Internal State"
+        "domain": "Cognitive, Internal State",
+        "task_structure": "SingleTask",
+        "stimulation": "Auditory, No",
+        "task": "Emotion, Resting State",
+        "timing": "Synchronous, Passive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds002778",
         "task_modality": "Passive",
-        "domain": "Clinical, Internal State"
+        "domain": "Clinical, Internal State",
+        "task_structure": "SingleTask",
+        "stimulation": "No",
+        "task": "Resting State",
+        "timing": "Passive",
+        "population_age": "Adult, Elderly",
+        "population_health": "Healthy, Unhealthy, Parkinson",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds003004",
         "task_modality": "Auditory",
-        "domain": "Cognitive, Internal State"
+        "domain": "Cognitive, Internal State",
+        "task_structure": "SingleTask",
+        "stimulation": "Auditory",
+        "task": "Emotion",
+        "timing": "Asynchronous, Active",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds003690",
         "task_modality": "Auditory",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "MultiTask",
+        "stimulation": "Auditory",
+        "task": "PerceptionAuditory, DecisionMaking, ReactionTime",
+        "timing": "Synchronous, Reactive, Passive",
+        "population_age": "Adult, Elderly",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds003775",
         "task_modality": "Passive",
-        "domain": "Internal State"
+        "domain": "Internal State",
+        "task_structure": "SingleTask",
+        "stimulation": "No",
+        "task": "Resting State",
+        "timing": "Passive",
+        "population_age": "Adult, Elderly",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds003825",
         "task_modality": "Visual",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, Attention",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds003846",
         "task_modality": "Visual, Haptic",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual, Haptic",
+        "task": "Motor Execution, PerceptionHaptic, PerceptionVisual",
+        "timing": "Asynchronous, Active, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds003885",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, DecisionMaking",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds003887",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, DecisionMaking",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds003969",
         "task_modality": "Auditory",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "MultiTask",
+        "stimulation": "No",
+        "task": "Emotion, Memory",
+        "timing": "Asynchronous, Active",
+        "population_age": "Adult, Elderly",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004043",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Attention, ReactionTime",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004147",
         "task_modality": "Visual",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual, Auditory",
+        "task": "DecisionMaking",
+        "timing": "Synchronous, Active",
+        "population_age": "Adult, Elderly",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004148",
         "task_modality": "Passive",
-        "domain": "Internal State"
+        "domain": "Internal State",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual, No",
+        "task": "Resting State, Memory, Language",
+        "timing": "Asynchronous, Active, Passive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004152",
         "task_modality": "Auditory, Visual",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual, Auditory",
+        "task": "Memory, ReactionTime",
+        "timing": "Synchronous, Active",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004262",
         "task_modality": "Visual",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "DecisionMaking, ReactionTime",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004264",
         "task_modality": "Visual",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "DecisionMaking, Motor Execution",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004279",
         "task_modality": "Auditory",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Auditory",
+        "task": "Language, PerceptionAuditory",
+        "timing": "Synchronous, Active",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "ON_ds004284",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "DecisionMaking",
+        "timing": "Reactive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds004315",
         "task_modality": "Visual, Auditory",
-        "domain": "Cognitive, Internal State"
+        "domain": "Cognitive, Internal State",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "DecisionMaking",
+        "timing": "Reactive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004324",
         "task_modality": "Visual, Auditory",
-        "domain": "Cognitive, Internal State, Evoked Response"
+        "domain": "Cognitive, Internal State, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, Emotion",
+        "timing": "Reactive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds004356",
         "task_modality": "Auditory",
-        "domain": "Evoked Response"
+        "domain": "Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Auditory",
+        "task": "PerceptionAuditory, Language",
+        "timing": "Passive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004357",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004395",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual",
+        "task": "Memory, DecisionMaking, PerceptionVisual",
+        "timing": "Synchronous, Active",
+        "population_age": "Adult, Elderly",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds004408",
         "task_modality": "Auditory",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Auditory",
+        "task": "PerceptionAuditory, Language",
+        "timing": "Passive, Synchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004477",
         "task_modality": "Visual, Auditory",
-        "domain": "Cognitive, Internal State"
+        "domain": "Cognitive, Internal State",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "DecisionMaking",
+        "timing": "Asynchronous, Active",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004561",
         "task_modality": "Motor",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Electrics, Visual",
+        "task": "Motor Execution, PerceptionElectric",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004572",
         "task_modality": "Auditory",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Auditory",
+        "task": "Resting State, Relaxation",
+        "timing": "Passive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004582",
         "task_modality": "Visual",
-        "domain": "Cognitive, Internal State, Evoked Response"
+        "domain": "Cognitive, Internal State, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, Emotion",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004603",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, ReactionTime",
+        "timing": "Synchronous, Passive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004706",
         "task_modality": "Visual",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual",
+        "task": "Memory, PerceptionVisual",
+        "timing": "Synchronous, Active",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004816",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Attention, PerceptionVisual",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004817",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Attention, PerceptionVisual",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004840",
         "task_modality": "Auditory",
-        "domain": "Cognitive, Clinical"
+        "domain": "Cognitive, Clinical",
+        "task_structure": "SingleTask",
+        "stimulation": "Auditory",
+        "task": "Relaxation",
+        "timing": "Passive",
+        "population_age": "Adult",
+        "population_health": "Unhealthy, Burnt",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004902",
         "task_modality": "Passive",
-        "domain": "Internal State"
+        "domain": "Internal State",
+        "task_structure": "SingleTask",
+        "stimulation": "No",
+        "task": "Resting State",
+        "timing": "Passive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds004951",
         "task_modality": "Haptic",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Haptic",
+        "task": "PerceptionHaptic, Language",
+        "timing": "Synchronous, Active",
+        "population_age": "Adult",
+        "population_health": "Unhealthy, Blind",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds005089",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual",
+        "task": "Attention, PerceptionVisual, DecisionMaking",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds005095",
         "task_modality": "Visual",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Memory, ReactionTime",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds005121",
         "task_modality": "Sleep",
-        "domain": "Sleep, Cognitive"
+        "domain": "Sleep, Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Auditory",
+        "task": "Memory, Sleep",
+        "timing": "Synchronous, Passive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds005189",
         "task_modality": "Visual",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual",
+        "task": "Memory, Attention",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds005262",
         "task_modality": "Visual",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual, Auditory",
+        "task": "Language",
+        "timing": "Synchronous, Active",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "dry"
     },
     {
         "dataset": "ON_ds005273",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, DecisionMaking",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds005505",
         "task_modality": "Visual, Auditory, Passive",
-        "domain": "Clinical, Cognitive, Internal State, Evoked Response"
+        "domain": "Clinical, Cognitive, Internal State, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual, No",
+        "task": "Resting State, PerceptionVisual, Attention, DecisionMaking, Memory, Motor Execution",
+        "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
+        "population_age": "Adult, Child",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds005506",
         "task_modality": "Visual, Auditory, Passive",
-        "domain": "Clinical, Cognitive, Internal State, Evoked Response"
+        "domain": "Clinical, Cognitive, Internal State, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual, No",
+        "task": "Resting State, PerceptionVisual, Attention, DecisionMaking, Memory, Motor Execution",
+        "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
+        "population_age": "Adult, Child",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds005507",
         "task_modality": "Visual, Auditory, Passive",
-        "domain": "Clinical, Cognitive, Internal State, Evoked Response"
+        "domain": "Clinical, Cognitive, Internal State, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual, No",
+        "task": "Resting State, PerceptionVisual, Attention, DecisionMaking, Memory, Motor Execution",
+        "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
+        "population_age": "Adult, Child",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds005508",
         "task_modality": "Visual, Auditory, Passive",
-        "domain": "Clinical, Cognitive, Internal State, Evoked Response"
+        "domain": "Clinical, Cognitive, Internal State, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual, No",
+        "task": "Resting State, PerceptionVisual, Attention, DecisionMaking, Memory, Motor Execution",
+        "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
+        "population_age": "Adult, Child",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds005509",
         "task_modality": "Visual, Auditory, Passive",
-        "domain": "Clinical, Cognitive, Internal State, Evoked Response"
+        "domain": "Clinical, Cognitive, Internal State, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual, No",
+        "task": "Resting State, PerceptionVisual, Attention, DecisionMaking, Memory, Motor Execution",
+        "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
+        "population_age": "Adult, Child",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds005510",
         "task_modality": "Visual, Auditory, Passive",
-        "domain": "Clinical, Cognitive, Internal State, Evoked Response"
+        "domain": "Clinical, Cognitive, Internal State, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual, No",
+        "task": "Resting State, PerceptionVisual, Attention, DecisionMaking, Memory, Motor Execution",
+        "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
+        "population_age": "Adult, Child",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds005511",
         "task_modality": "Visual, Auditory, Passive",
-        "domain": "Clinical, Cognitive, Internal State, Evoked Response"
+        "domain": "Clinical, Cognitive, Internal State, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual, No",
+        "task": "Resting State, PerceptionVisual, Attention, DecisionMaking, Memory, Motor Execution",
+        "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
+        "population_age": "Adult, Child",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds005512",
         "task_modality": "Visual, Auditory, Passive",
-        "domain": "Clinical, Cognitive, Internal State, Evoked Response"
+        "domain": "Clinical, Cognitive, Internal State, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual, No",
+        "task": "Resting State, PerceptionVisual, Attention, DecisionMaking, Memory, Motor Execution",
+        "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
+        "population_age": "Adult, Child",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds005514",
         "task_modality": "Visual, Auditory, Passive",
-        "domain": "Clinical, Cognitive, Internal State, Evoked Response"
+        "domain": "Clinical, Cognitive, Internal State, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual, No",
+        "task": "Resting State, PerceptionVisual, Attention, DecisionMaking, Memory, Motor Execution",
+        "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
+        "population_age": "Adult, Child",
+        "population_health": "Healthy",
+        "electrode_type": "sponge"
     },
     {
         "dataset": "ON_ds005586",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual",
+        "timing": "Synchronous, Passive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds005594",
         "task_modality": "Visual",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, ReactionTime",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds005620",
         "task_modality": "Passive",
-        "domain": "Clinical, Internal State"
+        "domain": "Clinical, Internal State",
+        "task_structure": "MultiTask",
+        "stimulation": "Magnetic, No",
+        "task": "Resting State, Sleep",
+        "timing": "Synchronous, Asynchronous, Passive",
+        "population_age": "Adult",
+        "population_health": "Healthy, Sedated",
+        "electrode_type": "wet"
     },
     {
         "dataset": "ON_ds005697",
         "task_modality": "Visual",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual",
+        "timing": "Synchronous, Passive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "Ofner2017",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual",
+        "task": "Motor Imagery, Motor Execution",
+        "timing": "Active, Asynchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "PhysionetMI",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "MultiTask",
+        "stimulation": "Visual",
+        "task": "Motor Imagery, Motor Execution",
+        "timing": "Active, Asynchronous",
+        "population_age": "AgeUnknown",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "Schirrmeister2017",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Motor Imagery",
+        "timing": "Active, Asynchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "Shin2017A",
         "task_modality": "Motor, Cognitive",
-        "domain": "BCI, Cognitive, Internal State"
+        "domain": "BCI, Cognitive, Internal State",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "Sosulski2019",
         "task_modality": "Auditory",
-        "domain": "BCI, Evoked Response"
+        "domain": "BCI, Evoked Response",
+        "task_structure": "MultiTask",
+        "stimulation": "Auditory",
+        "task": "Attention, PerceptionAuditory",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "TDBRAIN",
         "task_modality": "Passive",
-        "domain": "Clinical, Internal State"
+        "domain": "Clinical, Internal State",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "THINGS2",
         "task_modality": "Visual",
-        "domain": "Cognitive"
+        "domain": "Cognitive",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "PerceptionVisual, Attention",
+        "timing": "Synchronous, Reactive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "TUH",
         "task_modality": "Clinical",
-        "domain": "Clinical"
+        "domain": "Clinical",
+        "task_structure": "Unknown",
+        "stimulation": "Unknown",
+        "task": "Unknown",
+        "timing": "Unknown",
+        "population_age": "Unknown",
+        "population_health": "Unknown",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "Weibo2014",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Motor Imagery",
+        "timing": "Active, Asynchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "Zhou2016",
         "task_modality": "Motor",
-        "domain": "BCI"
+        "domain": "BCI",
+        "task_structure": "SingleTask",
+        "stimulation": "Visual",
+        "task": "Motor Imagery",
+        "timing": "Active, Asynchronous",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "hms",
         "task_modality": "Clinical",
-        "domain": "Clinical"
+        "domain": "Clinical",
+        "task_structure": "No",
+        "stimulation": "No",
+        "task": "No task",
+        "timing": "Passive",
+        "population_age": "Adult",
+        "population_health": "Unhealthy, Epilepsy, Encephalopathy, Other pathology",
+        "electrode_type": "Unknown"
     },
     {
         "dataset": "siena",
         "task_modality": "Clinical",
-        "domain": "Clinical"
+        "domain": "Clinical",
+        "task_structure": "No",
+        "stimulation": "No",
+        "task": "No task, Sleep",
+        "timing": "Passive",
+        "population_age": "Adult",
+        "population_health": "Unhealthy, Epilepsy",
+        "electrode_type": "wet"
     },
     {
         "dataset": "sparkulee",
         "task_modality": "Auditory",
-        "domain": "Cognitive, Evoked Response"
+        "domain": "Cognitive, Evoked Response",
+        "task_structure": "SingleTask",
+        "stimulation": "Auditory",
+        "task": "Language, PerceptionAuditory",
+        "timing": "Synchronous, Passive",
+        "population_age": "Adult",
+        "population_health": "Healthy",
+        "electrode_type": "wet"
     }
 ]
