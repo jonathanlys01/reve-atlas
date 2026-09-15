@@ -43,6 +43,9 @@
     vendi_score_mean: number;
     vendi_score_q25: number;
     vendi_score_q75: number;
+    mean_pairwise_cosine_mean: number;
+    mean_pairwise_cosine_q25: number;
+    mean_pairwise_cosine_q75: number;
     mean_recon_loss_mean: number;
     mean_recon_loss_q25: number;
     mean_recon_loss_q75: number;
@@ -170,6 +173,10 @@
   $: activeViewRuns = activeRun ? runsForActiveView(activeRun) : [];
   $: activeViewCandidateK = activeViewRuns.reduce((total, run) => total + run.candidate_k, 0);
   $: activeViewSize = activeViewRuns.reduce((total, run) => total + run.actual_size, 0);
+  type ChartPoint = { x: number; y: number; r: number; current: boolean; tooltip: string };
+  type BaselinePoint = { x: number; y: number; xLo: number; xHi: number; yLo: number; yHi: number; tooltip: string };
+
+  let showBaseline = true;
   // The operating curve aggregates every recording (via curve_summary.parquet)
   // rather than replaying one recording's noisy sweep, so it stays stable as
   // w varies and is comparable against the stratified baseline below.
@@ -181,17 +188,68 @@
   $: strataBaseline = activeRun?.method === "dpp"
     ? curveSummary.find((row) => row.method === "random_stratified" && row.selection_eta === (selectedEta === "eta_010" ? 0.10 : 0.01)) ?? null
     : null;
-  $: curvePoints = strataBaseline ? [...operatingCurve, strataBaseline] : operatingCurve;
+  // The baseline sits far from the DPP curve on both metrics, so including it in
+  // the axis bounds can squash the curve down to a sliver — showBaseline lets it
+  // be excluded from both the plotted marker and the bounds it would otherwise stretch.
+  $: effectiveBaseline = showBaseline ? strataBaseline : null;
+  $: curvePoints = effectiveBaseline ? [...operatingCurve, effectiveBaseline] : operatingCurve;
   $: vendiMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.vendi_score_q25)) : 0;
   $: vendiMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.vendi_score_q75)) : 1;
+  $: cosineMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.mean_pairwise_cosine_q25)) : 0;
+  $: cosineMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.mean_pairwise_cosine_q75)) : 1;
   $: lossMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.mean_recon_loss_q25)) : 0;
   $: lossMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.mean_recon_loss_q75)) : 1;
-  function vendiX(value: number): number {
-    return 22 + ((value - vendiMin) / Math.max(vendiMax - vendiMin, 1e-9)) * 192;
+  function scaleX(value: number, min: number, max: number): number {
+    return 22 + ((value - min) / Math.max(max - min, 1e-9)) * 192;
   }
-  function lossY(value: number): number {
-    return 108 - ((value - lossMin) / Math.max(lossMax - lossMin, 1e-9)) * 96;
+  function scaleY(value: number, min: number, max: number): number {
+    return 108 - ((value - min) / Math.max(max - min, 1e-9)) * 96;
   }
+  function buildChartPoints(
+    rows: CurveSummaryRow[],
+    xOf: (row: CurveSummaryRow) => number,
+    xMin: number,
+    xMax: number,
+    xLabel: string,
+  ): ChartPoint[] {
+    return rows.map((row) => ({
+      x: scaleX(xOf(row), xMin, xMax),
+      y: scaleY(row.mean_recon_loss_mean, lossMin, lossMax),
+      r: row.w_interaction === activeRun?.w_interaction ? 5 : 3,
+      current: row.w_interaction === activeRun?.w_interaction,
+      tooltip: `w=${row.w_interaction} · ${xLabel} ${xOf(row).toPrecision(4)} · loss ${row.mean_recon_loss_mean.toPrecision(4)} (mean of ${row.recording_count} recordings)`,
+    }));
+  }
+  function buildBaselinePoint(
+    baseline: CurveSummaryRow | null,
+    xMeanOf: (row: CurveSummaryRow) => number,
+    xQ25Of: (row: CurveSummaryRow) => number,
+    xQ75Of: (row: CurveSummaryRow) => number,
+    xMin: number,
+    xMax: number,
+    xLabel: string,
+  ): BaselinePoint | null {
+    if (!baseline) return null;
+    return {
+      x: scaleX(xMeanOf(baseline), xMin, xMax),
+      y: scaleY(baseline.mean_recon_loss_mean, lossMin, lossMax),
+      xLo: scaleX(xQ25Of(baseline), xMin, xMax),
+      xHi: scaleX(xQ75Of(baseline), xMin, xMax),
+      yLo: scaleY(baseline.mean_recon_loss_q25, lossMin, lossMax),
+      yHi: scaleY(baseline.mean_recon_loss_q75, lossMin, lossMax),
+      tooltip: `Stratified baseline (η=${(baseline.selection_eta * 100).toFixed(0)}%) · ${xLabel} ${xMeanOf(baseline).toPrecision(4)} · loss ${baseline.mean_recon_loss_mean.toPrecision(4)} (mean of ${baseline.recording_count} recordings, IQR whiskers shown)`,
+    };
+  }
+  $: vendiChartPoints = buildChartPoints(operatingCurve, (row) => row.vendi_score_mean, vendiMin, vendiMax, "Vendi");
+  $: vendiBaselinePoint = buildBaselinePoint(
+    effectiveBaseline, (row) => row.vendi_score_mean, (row) => row.vendi_score_q25, (row) => row.vendi_score_q75,
+    vendiMin, vendiMax, "Vendi",
+  );
+  $: cosineChartPoints = buildChartPoints(operatingCurve, (row) => row.mean_pairwise_cosine_mean, cosineMin, cosineMax, "cosine");
+  $: cosineBaselinePoint = buildBaselinePoint(
+    effectiveBaseline, (row) => row.mean_pairwise_cosine_mean, (row) => row.mean_pairwise_cosine_q25, (row) => row.mean_pairwise_cosine_q75,
+    cosineMin, cosineMax, "cosine",
+  );
 
   async function initialize(): Promise<void> {
     const wasm = await wasmConnector();
@@ -393,44 +451,63 @@
               <div class="metric"><strong>{formatNumber(activeRun.median_recon_loss)}</strong><span>median loss</span></div>
               {#if activeRun.method === "dpp"}<div class="metric"><strong>{formatNumber(activeRun.baseline_jaccard)}</strong><span>baseline Jaccard</span></div><div class="metric"><strong>{formatNumber(activeRun.adjacent_jaccard)}</strong><span>adjacent Jaccard</span></div>{/if}
             </div>
-            {#if operatingCurve.length > 1}
+            {#snippet operatingCurveChart(title: string, points: ChartPoint[], baselinePoint: BaselinePoint | null, xAxisLabel: string, note: string)}
               <div class="tradeoff">
-                <h3>Vendi / loss operating curve</h3>
-                <svg viewBox="0 0 220 130" role="img" aria-label="Vendi diversity versus mean reconstruction loss: DPP operating curve versus stratified baseline, aggregated across recordings">
+                <h4>{title} / loss</h4>
+                <svg viewBox="0 0 220 130" role="img" aria-label="{title} versus mean reconstruction loss: DPP operating curve versus stratified baseline, aggregated across recordings">
                   <line x1="22" y1="8" x2="22" y2="108" />
                   <line x1="22" y1="108" x2="214" y2="108" />
-                  {#if strataBaseline}
-                    <line class="baseline-guide" x1="22" y1={lossY(strataBaseline.mean_recon_loss_mean)} x2="214" y2={lossY(strataBaseline.mean_recon_loss_mean)} />
-                    <line class="baseline-guide" x1={vendiX(strataBaseline.vendi_score_mean)} y1="8" x2={vendiX(strataBaseline.vendi_score_mean)} y2="108" />
+                  {#if baselinePoint}
+                    <line class="baseline-guide" x1="22" y1={baselinePoint.y} x2="214" y2={baselinePoint.y} />
+                    <line class="baseline-guide" x1={baselinePoint.x} y1="8" x2={baselinePoint.x} y2="108" />
                   {/if}
-                  <polyline class="curve-line" points={operatingCurve.map((row) => `${vendiX(row.vendi_score_mean)},${lossY(row.mean_recon_loss_mean)}`).join(" ")} />
-                  {#each operatingCurve as row}
-                    <circle
-                      class="curve-point"
-                      class:current={row.w_interaction === activeRun.w_interaction}
-                      cx={vendiX(row.vendi_score_mean)}
-                      cy={lossY(row.mean_recon_loss_mean)}
-                      r={row.w_interaction === activeRun.w_interaction ? 5 : 3}
-                    ><title>w={row.w_interaction} · Vendi {row.vendi_score_mean.toPrecision(4)} · loss {row.mean_recon_loss_mean.toPrecision(4)} (mean of {row.recording_count} recordings)</title></circle>
+                  <polyline class="curve-line" points={points.map((point) => `${point.x},${point.y}`).join(" ")} />
+                  {#each points as point}
+                    <circle class="curve-point" class:current={point.current} cx={point.x} cy={point.y} r={point.r}><title>{point.tooltip}</title></circle>
                   {/each}
-                  {#if strataBaseline}
-                    <line class="baseline-whisker" x1={vendiX(strataBaseline.vendi_score_q25)} y1={lossY(strataBaseline.mean_recon_loss_mean)} x2={vendiX(strataBaseline.vendi_score_q75)} y2={lossY(strataBaseline.mean_recon_loss_mean)} />
-                    <line class="baseline-whisker" x1={vendiX(strataBaseline.vendi_score_mean)} y1={lossY(strataBaseline.mean_recon_loss_q25)} x2={vendiX(strataBaseline.vendi_score_mean)} y2={lossY(strataBaseline.mean_recon_loss_q75)} />
+                  {#if baselinePoint}
+                    <line class="baseline-whisker" x1={baselinePoint.xLo} y1={baselinePoint.y} x2={baselinePoint.xHi} y2={baselinePoint.y} />
+                    <line class="baseline-whisker" x1={baselinePoint.x} y1={baselinePoint.yLo} x2={baselinePoint.x} y2={baselinePoint.yHi} />
                     <rect
                       class="baseline-marker"
-                      x={vendiX(strataBaseline.vendi_score_mean) - 4}
-                      y={lossY(strataBaseline.mean_recon_loss_mean) - 4}
+                      x={baselinePoint.x - 4}
+                      y={baselinePoint.y - 4}
                       width="8" height="8"
-                      transform={`rotate(45 ${vendiX(strataBaseline.vendi_score_mean)} ${lossY(strataBaseline.mean_recon_loss_mean)})`}
-                    ><title>Stratified baseline (η={(strataBaseline.selection_eta * 100).toFixed(0)}%) · Vendi {strataBaseline.vendi_score_mean.toPrecision(4)} · loss {strataBaseline.mean_recon_loss_mean.toPrecision(4)} (mean of {strataBaseline.recording_count} recordings, IQR whiskers shown)</title></rect>
+                      transform={`rotate(45 ${baselinePoint.x} ${baselinePoint.y})`}
+                    ><title>{baselinePoint.tooltip}</title></rect>
                   {/if}
                 </svg>
-                <div class="axis-labels"><span>Vendi →</span><span>loss ↑</span></div>
+                <div class="axis-labels"><span>{xAxisLabel}</span><span>loss ↑</span></div>
                 <ul class="legend">
                   <li><span class="swatch curve"></span>DPP sweep ({activeRun.kernel_method})</li>
-                  {#if strataBaseline}<li><span class="swatch baseline"></span>Stratified baseline (η={(strataBaseline.selection_eta * 100).toFixed(0)}%)</li>{/if}
+                  {#if baselinePoint}<li><span class="swatch baseline"></span>Stratified baseline</li>{/if}
                 </ul>
-                <small>{activeRun.kernel_method === "multiplicative" ? "Higher w emphasizes ranking utility." : "Higher w emphasizes interaction/diversity."} Aggregated over {operatingCurve[0]?.recording_count ?? 0} recordings; baseline whiskers show the IQR.</small>
+                <small>{note}</small>
+              </div>
+            {/snippet}
+            {#if operatingCurve.length > 1}
+              <div class="tradeoff-group">
+                <div class="tradeoff-header">
+                  <h3>Operating curves</h3>
+                  {#if strataBaseline}
+                    <label class="baseline-toggle"><input type="checkbox" bind:checked={showBaseline} /> Show baseline</label>
+                  {/if}
+                </div>
+                {@render operatingCurveChart(
+                  "Vendi diversity",
+                  vendiChartPoints,
+                  vendiBaselinePoint,
+                  "Vendi diversity →",
+                  activeRun.kernel_method === "multiplicative" ? "Higher w emphasizes ranking utility." : "Higher w emphasizes interaction/diversity.",
+                )}
+                {@render operatingCurveChart(
+                  "Cosine similarity",
+                  cosineChartPoints,
+                  cosineBaselinePoint,
+                  "← more diverse · cosine similarity · less diverse →",
+                  "Mean pairwise cosine of selected rows; lower means more diverse.",
+                )}
+                {#if strataBaseline}<small class="baseline-note">Baseline whiskers show the interquartile range across recordings.</small>{/if}
               </div>
             {/if}
           </div>
@@ -550,6 +627,14 @@
   .metric span, small, .axis-labels { color: var(--text-soft); font-size: 0.65rem; }
   .metric.hero { grid-column: 1 / -1; padding: 0.7rem; border-radius: 0.45rem; background: var(--hero-bg); }
   .metric.hero strong { font-size: 1.5rem; }
+  .tradeoff-group { margin-top: 1.25rem; }
+  .tradeoff-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+  .tradeoff-header h3 { margin: 0; }
+  .baseline-toggle { display: flex; align-items: center; gap: 0.3rem; color: var(--text-soft); font-size: 0.65rem; font-weight: 400; letter-spacing: normal; text-transform: none; }
+  .baseline-toggle input { accent-color: var(--curve-baseline); }
+  .baseline-note { display: block; margin-top: 0.35rem; }
+  .tradeoff { margin-top: 0.75rem; }
+  .tradeoff h4 { margin: 0 0 0.3rem; color: var(--text-muted); font-size: 0.68rem; font-weight: 600; text-transform: none; }
   .tradeoff svg { display: block; width: 100%; height: 8rem; overflow: visible; }
   .tradeoff line { stroke: var(--input-border); stroke-width: 1; }
   .tradeoff line.baseline-guide { stroke: var(--curve-baseline); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0.55; }
