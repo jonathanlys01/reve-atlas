@@ -56,7 +56,7 @@
   const DEFAULT_SELECTIONS_URL =
     "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/selections.parquet";
   const DEFAULT_RUNS_URL =
-    "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/selection_runs.parquet";
+    "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/selection_runs_web.parquet";
   const DEFAULT_CURVES_URL =
     "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/curve_summary.parquet";
   const atlasUrl =
@@ -273,7 +273,26 @@
       return;
     }
     await coordinator.exec(`CREATE OR REPLACE TABLE selection_memberships AS SELECT * FROM read_parquet(${SQL.literal(selectionsUrl)})`);
-    await coordinator.exec(`CREATE OR REPLACE TABLE selection_runs AS SELECT * FROM read_parquet(${SQL.literal(runsUrl)})`);
+    // Hugging Face serves LFS/Xet files through a redirect whose Content-Length
+    // DuckDB-WASM can mistake for the Parquet size. The browser follows that
+    // redirect correctly, so register the small web-specific table as a local
+    // DuckDB file instead of asking DuckDB to open the remote URL itself.
+    const runsResponse = await fetch(runsUrl, { cache: "no-store" });
+    if (!runsResponse.ok) {
+      throw new Error(`Could not load ${runsUrl}: HTTP ${runsResponse.status}`);
+    }
+    const runsFile = "selection_runs_web.parquet";
+    const duckdb = await wasm.getDuckDB();
+    await duckdb.registerFileBuffer(runsFile, new Uint8Array(await runsResponse.arrayBuffer()));
+    await coordinator.exec(`
+      CREATE OR REPLACE TABLE selection_runs AS
+      SELECT
+        run_id, config_id, method, direction, scope, candidate_run_id,
+        big_recording_index, candidate_k, actual_size, kernel_method,
+        w_interaction, vendi_score, log_det, mean_recon_loss,
+        median_recon_loss, baseline_jaccard, adjacent_jaccard
+      FROM read_parquet(${SQL.literal(runsFile)})
+    `);
     await coordinator.exec(`CREATE OR REPLACE TABLE curve_summary_table AS SELECT * FROM read_parquet(${SQL.literal(curvesUrl)})`);
     curveSummary = (await coordinator.query("SELECT * FROM curve_summary_table", { type: "json" })) as CurveSummaryRow[];
     await coordinator.exec(`
