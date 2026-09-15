@@ -1,12 +1,10 @@
 <script lang="ts">
   import { Coordinator, wasmConnector } from "@uwdata/mosaic-core";
   import * as SQL from "@uwdata/mosaic-sql";
-  import { tick } from "svelte";
   import { EmbeddingAtlas } from "embedding-atlas/svelte";
 
   type Method = "ranking" | "dpp";
   type Scope = "global" | "per_recording";
-  type ViewMode = "all" | "candidate" | "selected";
   type Eta = "eta_001" | "eta_010";
   type Run = {
     run_id: string;
@@ -17,7 +15,7 @@
     candidate_run_id: string | null;
     big_recording_index: number | null;
     candidate_k: number;
-    selection_k: number;
+    selection_eta: number;
     actual_size: number;
     kernel_method: "multiplicative" | "additive" | null;
     w_interaction: number | null;
@@ -83,6 +81,16 @@
   // with list_contains(string_split(...)) inline in the quick-filter predicates below instead.
   const DOMAIN_TAGS = ["BCI", "Clinical", "Cognitive", "Evoked Response", "Internal State", "Sleep"];
   const TASK_MODALITY_TAGS = ["Auditory", "Clinical", "Cognitive", "Haptic", "Motor", "Passive", "Sleep", "Visual"];
+  const DPP_FILTERS = [
+    { key: "eta_001_multiplicative", eta: 0.01, etaLabel: "1%", kernel: "multiplicative", kernelLabel: "Multiplicative" },
+    { key: "eta_001_additive", eta: 0.01, etaLabel: "1%", kernel: "additive", kernelLabel: "Additive" },
+    { key: "eta_010_multiplicative", eta: 0.10, etaLabel: "10%", kernel: "multiplicative", kernelLabel: "Multiplicative" },
+    { key: "eta_010_additive", eta: 0.10, etaLabel: "10%", kernel: "additive", kernelLabel: "Additive" },
+  ] as const;
+  type DppFilter = (typeof DPP_FILTERS)[number];
+  function dppColumn(direction: "top" | "bottom", filter: DppFilter): string {
+    return `dpp_${direction}_${filter.key}`;
+  }
   function tagPredicateItems(column: string, tags: string[]) {
     return tags.map((tag) => ({
       name: tag,
@@ -97,97 +105,59 @@
 
   let realMode = false;
   let runs: Run[] = [];
-  let activeRunId = "";
-  let activeRun: Run | null = null;
-  let validRuns: Run[] = [];
-  let availableRecordings: string[] = [];
   let curveSummary: CurveSummaryRow[] = [];
-  let selectedMethod: Method = "dpp";
-  let selectedDirection: "top" | "bottom" = "top";
-  let selectedEta: Eta = "eta_010";
-  let selectedScope: Scope = "per_recording";
-  let selectedRecording = "all";
-  let selectedKernel: "multiplicative" | "additive" = "multiplicative";
-  let viewMode: ViewMode = "all";
+  let railTab: "explore" | "curves" = "explore";
   let activeTableName = "";
-  let refreshSerial = 0;
-  let refreshChain: Promise<void> = Promise.resolve();
-  // Both ranking and DPP config_ids carry a "eta_001"/"eta_010" tag marking the per-recording
-  // candidate-pool size (1% or 10% of a recording's windows). Older/demo runs have neither tag
-  // and are treated as eta-agnostic so they still show up.
-  function runEta(run: Run): Eta | null {
-    if (run.config_id.includes("eta_001")) return "eta_001";
-    if (run.config_id.includes("eta_010")) return "eta_010";
-    return null;
+  let atlasDppMode: "all" | "selected" = "all";
+  let atlasDppDirection: "top" | "bottom" = "top";
+  let atlasDppEta: Eta = "eta_010";
+  let atlasDppKernel: "multiplicative" | "additive" = "multiplicative";
+  let atlasWIndex = 0;
+  const atlasDppFilterSource = { reset: () => atlasDppMode = "all" };
+  $: atlasWValues = [...new Set(
+    runs.filter((run) => run.method === "dpp" && run.direction === atlasDppDirection &&
+      run.selection_eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) && run.kernel_method === atlasDppKernel)
+      .map((run) => run.w_interaction)
+      .filter((value): value is number => value !== null),
+  )].sort((a, b) => a - b);
+  $: atlasWValue = atlasWValues[Math.min(atlasWIndex, Math.max(0, atlasWValues.length - 1))] ?? null;
+
+  async function applyAtlasDppFilter(resetWeight = false): Promise<void> {
+    if (resetWeight) atlasWIndex = 0;
+    let group = [...coordinator.filterGroups.values()].sort((a, b) => b.clients.size - a.clients.size)[0];
+    for (let attempt = 0; !group && attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      group = [...coordinator.filterGroups.values()].sort((a, b) => b.clients.size - a.clients.size)[0];
+    }
+    if (!group) return;
+    const filter = DPP_FILTERS.find((item) =>
+      item.eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) && item.kernel === atlasDppKernel);
+    const weightIndex = resetWeight ? 0 : Math.min(atlasWIndex, Math.max(0, atlasWValues.length - 1));
+    const value = atlasWValues[weightIndex] ?? null;
+    group.selection.update({
+      source: atlasDppFilterSource,
+      value: atlasDppMode === "selected" ? { direction: atlasDppDirection, eta: atlasDppEta, kernel: atlasDppKernel, w: value } : null,
+      predicate: atlasDppMode === "selected" && filter && value !== null
+        ? SQL.listContains(dppColumn(atlasDppDirection, filter), value)
+        : null,
+    });
   }
-  $: availableRecordings = [
-    "all",
-    ...new Set(
-      runs.filter((run) => run.method === selectedMethod &&
-        run.direction === selectedDirection &&
-        run.scope === (selectedMethod === "dpp" ? "per_recording" : selectedScope) &&
-        (selectedMethod === "ranking" || run.kernel_method === selectedKernel) &&
-        (runEta(run) === selectedEta || runEta(run) === null) &&
-        run.big_recording_index !== null)
-        .map((run) => run.big_recording_index as number)
-        .sort((a, b) => a - b).map(String),
-    ),
-  ];
-  $: validRuns = runs.filter((run) => {
-    const recordingMatches = selectedScope === "global"
-      ? run.big_recording_index === null
-      : selectedRecording === "all" || String(run.big_recording_index) === selectedRecording;
-    return run.method === selectedMethod && run.direction === selectedDirection &&
-      run.scope === selectedScope && recordingMatches &&
-      (selectedMethod === "ranking" || run.kernel_method === selectedKernel) &&
-      (runEta(run) === selectedEta || runEta(run) === null);
-  });
-  $: activeRun = validRuns.find((run) => run.run_id === activeRunId) ?? validRuns[0] ?? null;
-  function sameSelectionSweep(left: Run, right: Run): boolean {
-    return left.method === right.method && left.config_id === right.config_id &&
-      left.direction === right.direction && left.scope === right.scope &&
-      left.kernel_method === right.kernel_method && left.w_interaction === right.w_interaction;
-  }
-  $: interactionRuns = (selectedRecording === "all" && selectedScope === "per_recording"
-    ? validRuns.filter((run, index, all) => all.findIndex((candidate) => sameSelectionSweep(candidate, run)) === index)
-    : validRuns
-  ).slice().sort((a, b) => (a.w_interaction ?? -Infinity) - (b.w_interaction ?? -Infinity));
-  $: sweepIndex = Math.max(0, interactionRuns.findIndex((run) => run.run_id === activeRunId));
-  $: sweepLabel = interactionRuns[sweepIndex]
-    ? (interactionRuns[sweepIndex].method === "ranking"
-        ? `${interactionRuns[sweepIndex].actual_size} rows`
-        : `w=${interactionRuns[sweepIndex].w_interaction} · ${interactionRuns[sweepIndex].actual_size} rows`)
-    : "—";
-  function onSweepInput(event: Event): void {
-    const index = Number((event.currentTarget as HTMLInputElement).value);
-    const run = interactionRuns[index];
-    if (!run) return;
-    activeRunId = run.run_id;
-    void refreshActiveView(run);
-  }
-  function runsForActiveView(run: Run): Run[] {
-    if (run.scope !== "per_recording" || selectedRecording !== "all") return [run];
-    const matchingRuns = validRuns.filter((candidate) => sameSelectionSweep(candidate, run));
-    return matchingRuns.length ? matchingRuns : [run];
-  }
-  $: activeViewRuns = activeRun ? runsForActiveView(activeRun) : [];
-  $: activeViewCandidateK = activeViewRuns.reduce((total, run) => total + run.candidate_k, 0);
-  $: activeViewSize = activeViewRuns.reduce((total, run) => total + run.actual_size, 0);
   type ChartPoint = { x: number; y: number; r: number; current: boolean; tooltip: string };
   type BaselinePoint = { x: number; y: number; xLo: number; xHi: number; yLo: number; yHi: number; tooltip: string };
 
   let showBaseline = true;
+  let curveDirection: "top" | "bottom" = "top";
+  let curveEta: Eta = "eta_010";
+  let curveKernel: "multiplicative" | "additive" = "multiplicative";
   // The operating curve aggregates every recording (via curve_summary.parquet)
   // rather than replaying one recording's noisy sweep, so it stays stable as
   // w varies and is comparable against the stratified baseline below.
-  $: operatingCurve = activeRun?.method === "dpp"
-    ? curveSummary
-        .filter((row) => row.method === "dpp" && row.config_id === activeRun?.config_id)
-        .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0))
-    : [];
-  $: strataBaseline = activeRun?.method === "dpp"
-    ? curveSummary.find((row) => row.method === "random_stratified" && row.selection_eta === (selectedEta === "eta_010" ? 0.10 : 0.01)) ?? null
-    : null;
+  $: operatingCurve = curveSummary
+    .filter((row) => row.method === "dpp" && row.direction === curveDirection &&
+      row.selection_eta === (curveEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === curveKernel)
+    .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0));
+  $: strataBaseline = curveSummary.find((row) =>
+    row.method === "random_stratified" && row.selection_eta === (curveEta === "eta_010" ? 0.10 : 0.01)) ?? null;
   // The baseline sits far from the DPP curve on both metrics, so including it in
   // the axis bounds can squash the curve down to a sliver — showBaseline lets it
   // be excluded from both the plotted marker and the bounds it would otherwise stretch.
@@ -199,11 +169,15 @@
   $: cosineMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.mean_pairwise_cosine_q75)) : 1;
   $: lossMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.mean_recon_loss_q25)) : 0;
   $: lossMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.mean_recon_loss_q75)) : 1;
+  const CHART_LEFT = 34;
+  const CHART_RIGHT = 406;
+  const CHART_TOP = 12;
+  const CHART_BOTTOM = 174;
   function scaleX(value: number, min: number, max: number): number {
-    return 22 + ((value - min) / Math.max(max - min, 1e-9)) * 192;
+    return CHART_LEFT + ((value - min) / Math.max(max - min, 1e-9)) * (CHART_RIGHT - CHART_LEFT);
   }
   function scaleY(value: number, min: number, max: number): number {
-    return 108 - ((value - min) / Math.max(max - min, 1e-9)) * 96;
+    return CHART_BOTTOM - ((value - min) / Math.max(max - min, 1e-9)) * (CHART_BOTTOM - CHART_TOP);
   }
   function buildChartPoints(
     rows: CurveSummaryRow[],
@@ -211,12 +185,15 @@
     xMin: number,
     xMax: number,
     xLabel: string,
+    yMin = lossMin,
+    yMax = lossMax,
+    currentWeight: number | null = null,
   ): ChartPoint[] {
     return rows.map((row) => ({
       x: scaleX(xOf(row), xMin, xMax),
-      y: scaleY(row.mean_recon_loss_mean, lossMin, lossMax),
-      r: row.w_interaction === activeRun?.w_interaction ? 5 : 3,
-      current: row.w_interaction === activeRun?.w_interaction,
+      y: scaleY(row.mean_recon_loss_mean, yMin, yMax),
+      r: row.w_interaction === currentWeight ? 6 : 4,
+      current: row.w_interaction === currentWeight,
       tooltip: `w=${row.w_interaction} · ${xLabel} ${xOf(row).toPrecision(4)} · loss ${row.mean_recon_loss_mean.toPrecision(4)} (mean of ${row.recording_count} recordings)`,
     }));
   }
@@ -249,6 +226,18 @@
   $: cosineBaselinePoint = buildBaselinePoint(
     effectiveBaseline, (row) => row.mean_pairwise_cosine_mean, (row) => row.mean_pairwise_cosine_q25, (row) => row.mean_pairwise_cosine_q75,
     cosineMin, cosineMax, "cosine",
+  );
+  $: atlasOperatingCurve = curveSummary
+    .filter((row) => row.method === "dpp" && row.direction === atlasDppDirection &&
+      row.selection_eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === atlasDppKernel)
+    .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0));
+  $: atlasVendiMin = atlasOperatingCurve.length ? Math.min(...atlasOperatingCurve.map((row) => row.vendi_score_mean)) : 0;
+  $: atlasVendiMax = atlasOperatingCurve.length ? Math.max(...atlasOperatingCurve.map((row) => row.vendi_score_mean)) : 1;
+  $: atlasLossMin = atlasOperatingCurve.length ? Math.min(...atlasOperatingCurve.map((row) => row.mean_recon_loss_mean)) : 0;
+  $: atlasLossMax = atlasOperatingCurve.length ? Math.max(...atlasOperatingCurve.map((row) => row.mean_recon_loss_mean)) : 1;
+  $: atlasVendiPoints = buildChartPoints(
+    atlasOperatingCurve, (row) => row.vendi_score_mean, atlasVendiMin, atlasVendiMax, "Vendi",
+    atlasLossMin, atlasLossMax, atlasWValue,
   );
 
   async function initialize(): Promise<void> {
@@ -288,7 +277,7 @@
       CREATE OR REPLACE TABLE selection_runs AS
       SELECT
         run_id, config_id, method, direction, scope, candidate_run_id,
-        big_recording_index, candidate_k, actual_size, kernel_method,
+        big_recording_index, candidate_k, selection_eta, actual_size, kernel_method,
         w_interaction, vendi_score, log_det, mean_recon_loss,
         median_recon_loss, baseline_jaccard, adjacent_jaccard
       FROM read_parquet(${SQL.literal(runsFile)})
@@ -321,74 +310,35 @@
       { type: "json" },
     )) as Run[];
     if (!runs.length) throw new Error("The selection-runs table is empty.");
-    const first = runs.find((run) => run.method === "dpp" && run.direction === "top" && run.scope === "per_recording" && runEta(run) === "eta_010")
-      ?? runs.find((run) => run.method === "ranking" && run.direction === "top" && run.scope === "global")
-      ?? runs[0];
-    activeRunId = first.run_id;
-    await refreshActiveView(first);
-  }
-
-  async function refreshActiveView(run: Run | null = activeRun): Promise<void> {
-    const requestId = ++refreshSerial;
-    refreshChain = refreshChain.catch(() => undefined).then(async () => {
-      if (!realMode || !run || requestId !== refreshSerial) return;
-      const viewRuns = runsForActiveView(run);
-      const selectedRuns = viewRuns.map((item) => SQL.literal(item.run_id)).join(", ");
-      const candidateRuns = viewRuns
-        .map((item) => SQL.literal(item.method === "dpp" ? item.candidate_run_id ?? item.run_id : item.run_id))
-        .join(", ");
-      const filter = viewMode === "selected" ? "WHERE selected_members.row_id IS NOT NULL" :
-        viewMode === "candidate" ? "WHERE candidate_members.row_id IS NOT NULL" : "";
-      // embedding-atlas caches per-table category/legend metadata by table name, so reusing
-      // "active_points" across filter changes can serve stale colors/labels (or blank points)
-      // for the rebuilt table. Give every refresh a fresh name instead.
-      const nextTableName = `active_points_${requestId}`;
-      await coordinator.exec(`
-      CREATE OR REPLACE TABLE ${nextTableName} AS
-      WITH selected_members AS (
-        SELECT row_id, rank AS selected_rank FROM selection_memberships WHERE run_id IN (${selectedRuns})
-      ), candidate_members AS (
-        SELECT row_id, rank AS candidate_rank FROM selection_memberships WHERE run_id IN (${candidateRuns})
-      )
-      SELECT display_points.*, selected_members.selected_rank, candidate_members.candidate_rank,
-        selected_members.row_id IS NOT NULL AS selected,
-        candidate_members.row_id IS NOT NULL AS candidate,
-        CASE
-          WHEN selected_members.row_id IS NOT NULL THEN 2
-          WHEN candidate_members.row_id IS NOT NULL THEN 1
-          ELSE 0
-        END::INTEGER AS display_category
-      FROM display_points
-      LEFT JOIN selected_members USING (row_id)
-      LEFT JOIN candidate_members USING (row_id)
-      ${filter}
+    const membershipAggregates = DPP_FILTERS.flatMap((filter) =>
+      (["top", "bottom"] as const).map((direction) => `
+        list(DISTINCT selection_runs.w_interaction) FILTER (
+          WHERE selection_runs.direction = '${direction}'
+            AND selection_runs.selection_eta = ${filter.eta}
+            AND selection_runs.kernel_method = '${filter.kernel}'
+        ) AS ${dppColumn(direction, filter)}`),
+    ).join(",");
+    const membershipColumns = DPP_FILTERS.flatMap((filter) =>
+      (["top", "bottom"] as const).map((direction) => {
+        const column = dppColumn(direction, filter);
+        return `coalesce(dpp_memberships.${column}, []::DOUBLE[]) AS ${column}`;
+      }),
+    ).join(",");
+    await coordinator.exec(`
+      CREATE OR REPLACE TABLE dpp_memberships AS
+      SELECT selection_memberships.row_id, ${membershipAggregates}
+      FROM selection_memberships
+      INNER JOIN selection_runs USING (run_id)
+      WHERE selection_runs.method = 'dpp'
+      GROUP BY selection_memberships.row_id
     `);
-      if (requestId !== refreshSerial) {
-        await coordinator.exec(`DROP TABLE IF EXISTS ${nextTableName}`);
-        return;
-      }
-      const previousTableName = activeTableName;
-      activeTableName = nextTableName;
-      if (previousTableName) await coordinator.exec(`DROP TABLE IF EXISTS ${previousTableName}`);
-    });
-    await refreshChain;
-  }
-
-  async function onFilterChange(): Promise<void> {
-    if (selectedMethod === "dpp") selectedScope = "per_recording";
-    if (selectedScope === "global") selectedRecording = "all";
-    await tick();
-    if (selectedScope === "per_recording" && selectedRecording !== "all" && !availableRecordings.includes(selectedRecording)) {
-      selectedRecording = "all";
-      await tick();
-    }
-    const next = validRuns[0] ?? null;
-    activeRunId = next?.run_id ?? "";
-    await refreshActiveView(next);
-  }
-
-  function formatNumber(value: number | null): string {
-    return value === null || !Number.isFinite(value) ? "—" : value.toPrecision(5);
+    await coordinator.exec(`
+      CREATE OR REPLACE TABLE display_points_with_dpp AS
+      SELECT display_points.*, ${membershipColumns}
+      FROM display_points
+      LEFT JOIN dpp_memberships USING (row_id)
+    `);
+    activeTableName = "display_points_with_dpp";
   }
 
   async function exportSelection(
@@ -432,53 +382,67 @@
 {#await initialized}
   <main class="status" aria-live="polite"><div class="status-card"><div class="spinner" aria-hidden="true"></div><h1>REVE Embedding Atlas</h1><p>Loading projected EEG and MEG windows…</p></div></main>
 {:then}
-  <main class:real-mode={realMode} class="atlas-app">
+  <main class:real-mode={realMode} class:curves-mode={realMode && railTab === "curves"} class="atlas-app">
     {#if realMode}
       <aside class="side-rail" aria-label="Atlas controls and active run summary">
         <div class="panel-section">
           <p class="eyebrow">REVE explorer</p>
           <h1>Embedding Atlas</h1>
           <p class="rail-copy">Switch among precomputed rankings and diversity selections.</p>
-          <p class="display-note">Display cap: about 2M points; all selection members are retained. Per-recording views union matching intra-index runs.</p>
-          <div class="control-stack">
-            <label>Method<select bind:value={selectedMethod} onchange={onFilterChange}><option value="dpp">DPP selection</option><option value="ranking">Ranking</option></select></label>
-            <label>Direction<select bind:value={selectedDirection} onchange={onFilterChange}><option value="top">Top loss</option><option value="bottom">Bottom loss</option></select></label>
-            <label>Candidate pool<select bind:value={selectedEta} onchange={onFilterChange}><option value="eta_010">10% per recording</option><option value="eta_001">1% per recording</option></select></label>
-            <label>Scope<select bind:value={selectedScope} onchange={onFilterChange}><option value="global">Global</option><option value="per_recording">Per recording</option></select></label>
-            <label>Recording<select bind:value={selectedRecording} onchange={onFilterChange} disabled={selectedScope === "global"}>{#each availableRecordings as recording}<option value={recording}>{recording === "all" ? "All indexed recordings" : recording}</option>{/each}</select></label>
-            <label>Kernel<select bind:value={selectedKernel} onchange={onFilterChange} disabled={selectedMethod === "ranking"}><option value="multiplicative">Multiplicative · utility ↑</option><option value="additive">Additive · diversity ↑</option></select></label>
-            <label>Selection sweep
-              <input type="range" min="0" max={Math.max(0, interactionRuns.length - 1)} step="1"
-                value={sweepIndex} oninput={onSweepInput} disabled={interactionRuns.length <= 1} />
-              <span class="sweep-value">{sweepLabel}</span>
-            </label>
-            <label>View<select bind:value={viewMode} onchange={() => refreshActiveView(activeRun)}><option value="all">All atlas points</option><option value="candidate">Candidate pool</option><option value="selected">Selected rows only</option></select></label>
+          <div class="rail-tabs" role="tablist" aria-label="Atlas side-panel view">
+            <button type="button" role="tab" class:active={railTab === "explore"} aria-selected={railTab === "explore"} onclick={() => railTab = "explore"}>Explore</button>
+            <button type="button" role="tab" class:active={railTab === "curves"} aria-selected={railTab === "curves"} disabled={operatingCurve.length <= 1} onclick={() => railTab = "curves"}>Operating curves</button>
           </div>
-        </div>
-        {#if activeRun}
-          <div class="panel-section">
-            <p class="eyebrow">Active run</p>
-            <h2>{activeRun.method === "dpp" ? "DPP selection" : "Loss ranking"}</h2>
-            <p class="run-id">{activeRun.run_id}</p>
-            {#if activeViewRuns.length > 1}<p class="view-note">Showing {activeViewRuns.length} intra-index runs in this view.</p>{/if}
-            <div class="metric-grid">
-              <div class="metric hero"><strong>{formatNumber(activeRun.vendi_score)}</strong><span>Vendi diversity</span></div>
-              <div class="metric"><strong>{formatNumber(activeRun.log_det)}</strong><span>log determinant</span></div>
-              <div class="metric"><strong>{activeViewCandidateK}</strong><span>candidate rows in view</span></div>
-              <div class="metric"><strong>{activeViewSize}</strong><span>selected rows in view</span></div>
-              <div class="metric"><strong>{formatNumber(activeRun.mean_recon_loss)}</strong><span>mean loss</span></div>
-              <div class="metric"><strong>{formatNumber(activeRun.median_recon_loss)}</strong><span>median loss</span></div>
-              {#if activeRun.method === "dpp"}<div class="metric"><strong>{formatNumber(activeRun.baseline_jaccard)}</strong><span>baseline Jaccard</span></div><div class="metric"><strong>{formatNumber(activeRun.adjacent_jaccard)}</strong><span>adjacent Jaccard</span></div>{/if}
+          {#if railTab === "explore"}
+            <p class="display-note">Display cap: about 2M points; all selection members are retained.</p>
+            <p class="explore-note">Filter the stable atlas by any precomputed DPP selection. These controls preserve the canvas and combine with the atlas charts.</p>
+            {#if atlasVendiPoints.length > 1}
+              <div class="mini-curve">
+                <div class="mini-curve-header"><h3>Vendi diversity / loss</h3><span>{atlasWValue === null ? "" : `w=${atlasWValue}`}</span></div>
+                <svg viewBox="0 0 420 198" role="img" aria-label="Vendi diversity versus mean reconstruction loss for the current atlas DPP configuration">
+                  <line x1={CHART_LEFT} y1={CHART_TOP} x2={CHART_LEFT} y2={CHART_BOTTOM} />
+                  <line x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} />
+                  <polyline points={atlasVendiPoints.map((point) => `${point.x},${point.y}`).join(" ")} />
+                  {#each atlasVendiPoints as point}
+                    <circle class:current={point.current} cx={point.x} cy={point.y} r={point.r}><title>{point.tooltip}</title></circle>
+                  {/each}
+                </svg>
+                <div class="axis-labels"><span>Vendi diversity →</span><span>loss ↑</span></div>
+              </div>
+            {/if}
+            <div class="control-stack dpp-controls">
+              <label>Points<select bind:value={atlasDppMode} onchange={() => applyAtlasDppFilter()}><option value="all">All points</option><option value="selected">Selected only</option></select></label>
+              <div class="compact-controls">
+                <label>Direction<select bind:value={atlasDppDirection} onchange={() => applyAtlasDppFilter(true)}><option value="top">Top loss</option><option value="bottom">Bottom loss</option></select></label>
+                <label>Candidate pool<select bind:value={atlasDppEta} onchange={() => applyAtlasDppFilter(true)}><option value="eta_010">10%</option><option value="eta_001">1%</option></select></label>
+              </div>
+              <label>Kernel<select bind:value={atlasDppKernel} onchange={() => applyAtlasDppFilter(true)}><option value="multiplicative">Multiplicative</option><option value="additive">Additive</option></select></label>
+              <label>Interaction weight
+                <input type="range" min="0" max={Math.max(0, atlasWValues.length - 1)} step="1" bind:value={atlasWIndex} oninput={() => applyAtlasDppFilter()} disabled={atlasDppMode === "all" || atlasWValues.length <= 1} />
+                <span class="sweep-value">{atlasWValue === null ? "—" : `w=${atlasWValue}`}</span>
+              </label>
             </div>
-            {#snippet operatingCurveChart(title: string, points: ChartPoint[], baselinePoint: BaselinePoint | null, xAxisLabel: string, note: string)}
+          {/if}
+        </div>
+        {#if railTab === "curves"}
+          <div class="panel-section">
+            <p class="eyebrow">Aggregate analysis</p>
+            <h2>Operating curves</h2>
+            <p class="view-note">Curve controls are independent from the atlas selection filters.</p>
+            <div class="curve-controls">
+              <label>Direction<select bind:value={curveDirection}><option value="top">Top loss</option><option value="bottom">Bottom loss</option></select></label>
+              <label>Candidate pool<select bind:value={curveEta}><option value="eta_010">10% per recording</option><option value="eta_001">1% per recording</option></select></label>
+              <label>Kernel<select bind:value={curveKernel}><option value="multiplicative">Multiplicative</option><option value="additive">Additive</option></select></label>
+            </div>
+              {#snippet operatingCurveChart(title: string, points: ChartPoint[], baselinePoint: BaselinePoint | null, xAxisLabel: string, note: string)}
               <div class="tradeoff">
                 <h4>{title} / loss</h4>
-                <svg viewBox="0 0 220 130" role="img" aria-label="{title} versus mean reconstruction loss: DPP operating curve versus stratified baseline, aggregated across recordings">
-                  <line x1="22" y1="8" x2="22" y2="108" />
-                  <line x1="22" y1="108" x2="214" y2="108" />
+                <svg viewBox="0 0 420 198" role="img" aria-label="{title} versus mean reconstruction loss: DPP operating curve versus stratified baseline, aggregated across recordings">
+                  <line x1={CHART_LEFT} y1={CHART_TOP} x2={CHART_LEFT} y2={CHART_BOTTOM} />
+                  <line x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} />
                   {#if baselinePoint}
-                    <line class="baseline-guide" x1="22" y1={baselinePoint.y} x2="214" y2={baselinePoint.y} />
-                    <line class="baseline-guide" x1={baselinePoint.x} y1="8" x2={baselinePoint.x} y2="108" />
+                    <line class="baseline-guide" x1={CHART_LEFT} y1={baselinePoint.y} x2={CHART_RIGHT} y2={baselinePoint.y} />
+                    <line class="baseline-guide" x1={baselinePoint.x} y1={CHART_TOP} x2={baselinePoint.x} y2={CHART_BOTTOM} />
                   {/if}
                   <polyline class="curve-line" points={points.map((point) => `${point.x},${point.y}`).join(" ")} />
                   {#each points as point}
@@ -498,37 +462,37 @@
                 </svg>
                 <div class="axis-labels"><span>{xAxisLabel}</span><span>loss ↑</span></div>
                 <ul class="legend">
-                  <li><span class="swatch curve"></span>DPP sweep ({activeRun.kernel_method})</li>
+                  <li><span class="swatch curve"></span>DPP sweep ({curveKernel})</li>
                   {#if baselinePoint}<li><span class="swatch baseline"></span>Stratified baseline</li>{/if}
                 </ul>
                 <small>{note}</small>
               </div>
-            {/snippet}
-            {#if operatingCurve.length > 1}
-              <div class="tradeoff-group">
-                <div class="tradeoff-header">
-                  <h3>Operating curves</h3>
-                  {#if strataBaseline}
-                    <label class="baseline-toggle"><input type="checkbox" bind:checked={showBaseline} /> Show baseline</label>
-                  {/if}
+              {/snippet}
+              {#if operatingCurve.length > 1}
+                <div class="tradeoff-group">
+                  <div class="tradeoff-header">
+                    <h3>Operating curves</h3>
+                    {#if strataBaseline}
+                      <label class="baseline-toggle"><input type="checkbox" bind:checked={showBaseline} /> Show baseline</label>
+                    {/if}
+                  </div>
+                  {@render operatingCurveChart(
+                    "Vendi diversity",
+                    vendiChartPoints,
+                    vendiBaselinePoint,
+                    "Vendi diversity →",
+                    curveKernel === "multiplicative" ? "Higher w emphasizes ranking utility." : "Higher w emphasizes interaction/diversity.",
+                  )}
+                  {@render operatingCurveChart(
+                    "Cosine similarity",
+                    cosineChartPoints,
+                    cosineBaselinePoint,
+                    "← more diverse · cosine similarity · less diverse →",
+                    "Mean pairwise cosine of selected rows; lower means more diverse.",
+                  )}
+                  {#if strataBaseline}<small class="baseline-note">Baseline whiskers show the interquartile range across recordings.</small>{/if}
                 </div>
-                {@render operatingCurveChart(
-                  "Vendi diversity",
-                  vendiChartPoints,
-                  vendiBaselinePoint,
-                  "Vendi diversity →",
-                  activeRun.kernel_method === "multiplicative" ? "Higher w emphasizes ranking utility." : "Higher w emphasizes interaction/diversity.",
-                )}
-                {@render operatingCurveChart(
-                  "Cosine similarity",
-                  cosineChartPoints,
-                  cosineBaselinePoint,
-                  "← more diverse · cosine similarity · less diverse →",
-                  "Mean pairwise cosine of selected rows; lower means more diverse.",
-                )}
-                {#if strataBaseline}<small class="baseline-note">Baseline whiskers show the interquartile range across recordings.</small>{/if}
-              </div>
-            {/if}
+              {/if}
           </div>
         {/if}
       </aside>
@@ -540,7 +504,7 @@
           data={{ table: realMode ? activeTableName : "display_points", id: "row_id", text: "point_label", projection: { x: "projection_x", y: "projection_y" } }}
           defaultChartsConfig={{
             include: realMode
-              ? ["recon_loss", "dataset", "n_channels", "modality", "task_modality", "domain", "big_recording_index", "selected", "candidate"]
+              ? ["recon_loss", "dataset", "n_channels", "modality", "task_modality", "domain", "big_recording_index"]
               : ["recon_loss", "dataset", "n_channels", "modality", "task_modality", "domain"],
             override: {
               modality: {
@@ -619,6 +583,7 @@
     }
   }
   .atlas-app { display: grid; grid-template-columns: 20rem minmax(0, 1fr); min-width: 0; min-height: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+  .atlas-app.curves-mode { grid-template-columns: minmax(28rem, 34rem) minmax(0, 1fr); }
   .atlas-app:not(.real-mode) { display: block; }
   .atlas-shell { min-width: 0; min-height: 0; width: 100%; height: 100%; overflow: hidden; position: relative; }
   .side-rail { z-index: 2; box-sizing: border-box; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; border-right: 1px solid var(--border); background: var(--panel-bg); }
@@ -628,24 +593,35 @@
   h2 { margin: 0.1rem 0 0.3rem; color: var(--heading); font-size: 1.15rem; }
   h3 { margin: 1.25rem 0 0.25rem; color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
   p { margin: 0; color: var(--text-muted); line-height: 1.45; }
-  .rail-copy { margin-bottom: 0.35rem; font-size: 0.78rem; }
+  .rail-copy { margin-bottom: 0.75rem; font-size: 0.78rem; }
+  .rail-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; margin-bottom: 1rem; padding: 0.2rem; border-radius: 0.55rem; background: var(--input-disabled-bg); }
+  .rail-tabs button { margin: 0; padding: 0.5rem 0.65rem; border: 0; border-radius: 0.4rem; color: var(--text-soft); background: transparent; font-size: 0.72rem; font-weight: 650; cursor: pointer; }
+  .rail-tabs button.active { color: var(--hero-text); background: var(--panel-bg); box-shadow: 0 1px 3px var(--shadow); }
+  .rail-tabs button:disabled { color: var(--input-disabled-text); cursor: not-allowed; opacity: 0.65; }
   .display-note { margin-bottom: 1.25rem; color: var(--text-faint); font-size: 0.68rem; }
+  .explore-note { margin-bottom: 1rem; font-size: 0.78rem; }
   .eyebrow { margin-bottom: 0.45rem; color: var(--eyebrow); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
   .control-stack { display: grid; gap: 0.75rem; }
+  .compact-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+  .dpp-controls { padding-top: 1rem; border-top: 1px solid var(--border); }
+  .curve-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; margin-bottom: 1rem; }
   label { display: grid; gap: 0.25rem; color: var(--text-muted); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
   select { width: 100%; min-width: 0; box-sizing: border-box; padding: 0.45rem 0.4rem; border: 1px solid var(--input-border); border-radius: 0.35rem; color: var(--input-text); background: var(--input-bg); font-size: 0.75rem; text-transform: none; }
   select:disabled { color: var(--input-disabled-text); background: var(--input-disabled-bg); }
   input[type="range"] { width: 100%; accent-color: var(--accent); }
   input[type="range"]:disabled { opacity: 0.5; }
-  .sweep-value { color: var(--text-soft); font-size: 0.65rem; font-weight: 400; letter-spacing: normal; text-transform: none; }
-  .run-id { overflow: hidden; margin-bottom: 0.45rem; color: var(--run-id-text); font: 0.6rem ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+  .sweep-value { color: var(--text-soft); font-size: 0.68rem; font-weight: 500; letter-spacing: normal; text-transform: none; }
   .view-note { margin-bottom: 1rem; color: var(--text-soft); font-size: 0.68rem; }
-  .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem 0.55rem; }
-  .metric { display: grid; gap: 0.1rem; }
-  .metric strong { color: var(--hero-text); font-size: 0.92rem; }
-  .metric span, small, .axis-labels { color: var(--text-soft); font-size: 0.65rem; }
-  .metric.hero { grid-column: 1 / -1; padding: 0.7rem; border-radius: 0.45rem; background: var(--hero-bg); }
-  .metric.hero strong { font-size: 1.5rem; }
+  small, .axis-labels { color: var(--text-soft); font-size: 0.65rem; }
+  .mini-curve { margin-bottom: 1rem; padding: 0.65rem; border: 1px solid var(--border); border-radius: 0.55rem; background: var(--input-disabled-bg); }
+  .mini-curve-header { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+  .mini-curve-header h3 { margin: 0; }
+  .mini-curve-header span { color: var(--hero-text); font-size: 0.7rem; font-weight: 650; }
+  .mini-curve svg { display: block; width: 100%; height: auto; aspect-ratio: 420 / 198; }
+  .mini-curve line { stroke: var(--input-border); stroke-width: 1; }
+  .mini-curve polyline { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .mini-curve circle { fill: var(--accent); }
+  .mini-curve circle.current { fill: var(--eyebrow); stroke: var(--panel-bg); stroke-width: 2; }
   .tradeoff-group { margin-top: 1.25rem; }
   .tradeoff-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
   .tradeoff-header h3 { margin: 0; }
@@ -654,7 +630,7 @@
   .baseline-note { display: block; margin-top: 0.35rem; }
   .tradeoff { margin-top: 0.75rem; }
   .tradeoff h4 { margin: 0 0 0.3rem; color: var(--text-muted); font-size: 0.68rem; font-weight: 600; text-transform: none; }
-  .tradeoff svg { display: block; width: 100%; height: 8rem; overflow: visible; }
+  .tradeoff svg { display: block; width: 100%; height: auto; aspect-ratio: 420 / 198; overflow: visible; }
   .tradeoff line { stroke: var(--input-border); stroke-width: 1; }
   .tradeoff line.baseline-guide { stroke: var(--curve-baseline); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0.55; }
   .tradeoff line.baseline-whisker { stroke: var(--curve-baseline); stroke-width: 1.25; }
@@ -672,7 +648,7 @@
   .status-card { width: min(42rem, 100%); padding: 2.5rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--status-card-bg); box-shadow: 0 1.25rem 4rem var(--shadow); }
   .spinner { width: 1.75rem; height: 1.75rem; margin-bottom: 1.25rem; border: 3px solid var(--spinner-track); border-top-color: var(--accent); border-radius: 999px; animation: spin 0.8s linear infinite; }
   button { margin-top: 1.5rem; padding: 0.65rem 1rem; border: 0; border-radius: 0.5rem; color: white; background: var(--accent-strong); cursor: pointer; }
-  @media (max-width: 1050px) { .atlas-app.real-mode { grid-template-columns: 16rem minmax(0, 1fr); } }
+  @media (max-width: 1050px) { .atlas-app.real-mode { grid-template-columns: 16rem minmax(0, 1fr); } .atlas-app.real-mode.curves-mode { grid-template-columns: minmax(24rem, 28rem) minmax(0, 1fr); } }
   @media (max-width: 700px) { .atlas-app.real-mode { display: block; overflow: auto; } .side-rail { border: 0; border-bottom: 1px solid var(--border); } .atlas-shell { height: 70vh; min-height: 32rem; } }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
