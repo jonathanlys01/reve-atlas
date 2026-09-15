@@ -26,6 +26,7 @@ def main() -> None:
         "atlas.parquet": "data/atlas.parquet",
         "selections.parquet": "data/selections.parquet",
         "selection_runs.parquet": "data/selection_runs.parquet",
+        "curve_summary.parquet": "data/curve_summary.parquet",
         "manifest.json": "data/manifest.json",
     }
     for filename in files:

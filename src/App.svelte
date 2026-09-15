@@ -31,6 +31,25 @@
     baseline_jaccard: number | null;
     adjacent_jaccard: number | null;
   };
+  type CurveSummaryRow = {
+    config_id: string;
+    method: Method | "random_stratified";
+    direction: "top" | "bottom" | "random";
+    scope: Scope;
+    selection_eta: number;
+    kernel_method: "multiplicative" | "additive" | null;
+    w_interaction: number | null;
+    recording_count: number;
+    vendi_score_mean: number;
+    vendi_score_q25: number;
+    vendi_score_q75: number;
+    mean_pairwise_cosine_mean: number;
+    mean_pairwise_cosine_q25: number;
+    mean_pairwise_cosine_q75: number;
+    mean_recon_loss_mean: number;
+    mean_recon_loss_q25: number;
+    mean_recon_loss_q75: number;
+  };
 
   const DEFAULT_ATLAS_URL =
     "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/display.parquet";
@@ -38,10 +57,13 @@
     "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/selections.parquet";
   const DEFAULT_RUNS_URL =
     "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/selection_runs.parquet";
+  const DEFAULT_CURVES_URL =
+    "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/curve_summary.parquet";
   const atlasUrl =
     import.meta.env.VITE_ATLAS_ATLAS_URL ?? import.meta.env.VITE_ATLAS_DATA_URL ?? DEFAULT_ATLAS_URL;
   const selectionsUrl = import.meta.env.VITE_ATLAS_SELECTIONS_URL ?? DEFAULT_SELECTIONS_URL;
   const runsUrl = import.meta.env.VITE_ATLAS_RUNS_URL ?? DEFAULT_RUNS_URL;
+  const curvesUrl = import.meta.env.VITE_ATLAS_CURVES_URL ?? DEFAULT_CURVES_URL;
   const datasetTokenUrl = new URL(`${import.meta.env.BASE_URL}dataset_token.json`, window.location.href).toString();
   const REQUIRED_COLUMNS = [
     "row_id", "window_id", "projection_x", "projection_y", "recon_loss",
@@ -79,7 +101,7 @@
   let activeRun: Run | null = null;
   let validRuns: Run[] = [];
   let availableRecordings: string[] = [];
-  let tradeoffRuns: Run[] = [];
+  let curveSummary: CurveSummaryRow[] = [];
   let selectedMethod: Method = "dpp";
   let selectedDirection: "top" | "bottom" = "top";
   let selectedEta: Eta = "eta_010";
@@ -151,16 +173,83 @@
   $: activeViewRuns = activeRun ? runsForActiveView(activeRun) : [];
   $: activeViewCandidateK = activeViewRuns.reduce((total, run) => total + run.candidate_k, 0);
   $: activeViewSize = activeViewRuns.reduce((total, run) => total + run.actual_size, 0);
-  $: tradeoffRuns = activeRun?.method === "dpp"
-    ? runs.filter((run) => run.method === "dpp" && run.direction === activeRun?.direction &&
-        run.scope === activeRun?.scope && run.big_recording_index === activeRun?.big_recording_index &&
-        run.config_id === activeRun?.config_id)
+  type ChartPoint = { x: number; y: number; r: number; current: boolean; tooltip: string };
+  type BaselinePoint = { x: number; y: number; xLo: number; xHi: number; yLo: number; yHi: number; tooltip: string };
+
+  let showBaseline = true;
+  // The operating curve aggregates every recording (via curve_summary.parquet)
+  // rather than replaying one recording's noisy sweep, so it stays stable as
+  // w varies and is comparable against the stratified baseline below.
+  $: operatingCurve = activeRun?.method === "dpp"
+    ? curveSummary
+        .filter((row) => row.method === "dpp" && row.config_id === activeRun?.config_id)
         .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0))
     : [];
-  $: vendiMin = tradeoffRuns.length ? Math.min(...tradeoffRuns.map((run) => run.vendi_score)) : 0;
-  $: vendiMax = tradeoffRuns.length ? Math.max(...tradeoffRuns.map((run) => run.vendi_score)) : 1;
-  $: lossMin = tradeoffRuns.length ? Math.min(...tradeoffRuns.map((run) => run.mean_recon_loss)) : 0;
-  $: lossMax = tradeoffRuns.length ? Math.max(...tradeoffRuns.map((run) => run.mean_recon_loss)) : 1;
+  $: strataBaseline = activeRun?.method === "dpp"
+    ? curveSummary.find((row) => row.method === "random_stratified" && row.selection_eta === (selectedEta === "eta_010" ? 0.10 : 0.01)) ?? null
+    : null;
+  // The baseline sits far from the DPP curve on both metrics, so including it in
+  // the axis bounds can squash the curve down to a sliver — showBaseline lets it
+  // be excluded from both the plotted marker and the bounds it would otherwise stretch.
+  $: effectiveBaseline = showBaseline ? strataBaseline : null;
+  $: curvePoints = effectiveBaseline ? [...operatingCurve, effectiveBaseline] : operatingCurve;
+  $: vendiMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.vendi_score_q25)) : 0;
+  $: vendiMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.vendi_score_q75)) : 1;
+  $: cosineMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.mean_pairwise_cosine_q25)) : 0;
+  $: cosineMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.mean_pairwise_cosine_q75)) : 1;
+  $: lossMin = curvePoints.length ? Math.min(...curvePoints.map((row) => row.mean_recon_loss_q25)) : 0;
+  $: lossMax = curvePoints.length ? Math.max(...curvePoints.map((row) => row.mean_recon_loss_q75)) : 1;
+  function scaleX(value: number, min: number, max: number): number {
+    return 22 + ((value - min) / Math.max(max - min, 1e-9)) * 192;
+  }
+  function scaleY(value: number, min: number, max: number): number {
+    return 108 - ((value - min) / Math.max(max - min, 1e-9)) * 96;
+  }
+  function buildChartPoints(
+    rows: CurveSummaryRow[],
+    xOf: (row: CurveSummaryRow) => number,
+    xMin: number,
+    xMax: number,
+    xLabel: string,
+  ): ChartPoint[] {
+    return rows.map((row) => ({
+      x: scaleX(xOf(row), xMin, xMax),
+      y: scaleY(row.mean_recon_loss_mean, lossMin, lossMax),
+      r: row.w_interaction === activeRun?.w_interaction ? 5 : 3,
+      current: row.w_interaction === activeRun?.w_interaction,
+      tooltip: `w=${row.w_interaction} · ${xLabel} ${xOf(row).toPrecision(4)} · loss ${row.mean_recon_loss_mean.toPrecision(4)} (mean of ${row.recording_count} recordings)`,
+    }));
+  }
+  function buildBaselinePoint(
+    baseline: CurveSummaryRow | null,
+    xMeanOf: (row: CurveSummaryRow) => number,
+    xQ25Of: (row: CurveSummaryRow) => number,
+    xQ75Of: (row: CurveSummaryRow) => number,
+    xMin: number,
+    xMax: number,
+    xLabel: string,
+  ): BaselinePoint | null {
+    if (!baseline) return null;
+    return {
+      x: scaleX(xMeanOf(baseline), xMin, xMax),
+      y: scaleY(baseline.mean_recon_loss_mean, lossMin, lossMax),
+      xLo: scaleX(xQ25Of(baseline), xMin, xMax),
+      xHi: scaleX(xQ75Of(baseline), xMin, xMax),
+      yLo: scaleY(baseline.mean_recon_loss_q25, lossMin, lossMax),
+      yHi: scaleY(baseline.mean_recon_loss_q75, lossMin, lossMax),
+      tooltip: `Stratified baseline (η=${(baseline.selection_eta * 100).toFixed(0)}%) · ${xLabel} ${xMeanOf(baseline).toPrecision(4)} · loss ${baseline.mean_recon_loss_mean.toPrecision(4)} (mean of ${baseline.recording_count} recordings, IQR whiskers shown)`,
+    };
+  }
+  $: vendiChartPoints = buildChartPoints(operatingCurve, (row) => row.vendi_score_mean, vendiMin, vendiMax, "Vendi");
+  $: vendiBaselinePoint = buildBaselinePoint(
+    effectiveBaseline, (row) => row.vendi_score_mean, (row) => row.vendi_score_q25, (row) => row.vendi_score_q75,
+    vendiMin, vendiMax, "Vendi",
+  );
+  $: cosineChartPoints = buildChartPoints(operatingCurve, (row) => row.mean_pairwise_cosine_mean, cosineMin, cosineMax, "cosine");
+  $: cosineBaselinePoint = buildBaselinePoint(
+    effectiveBaseline, (row) => row.mean_pairwise_cosine_mean, (row) => row.mean_pairwise_cosine_q25, (row) => row.mean_pairwise_cosine_q75,
+    cosineMin, cosineMax, "cosine",
+  );
 
   async function initialize(): Promise<void> {
     const wasm = await wasmConnector();
@@ -185,6 +274,8 @@
     }
     await coordinator.exec(`CREATE OR REPLACE TABLE selection_memberships AS SELECT * FROM read_parquet(${SQL.literal(selectionsUrl)})`);
     await coordinator.exec(`CREATE OR REPLACE TABLE selection_runs AS SELECT * FROM read_parquet(${SQL.literal(runsUrl)})`);
+    await coordinator.exec(`CREATE OR REPLACE TABLE curve_summary_table AS SELECT * FROM read_parquet(${SQL.literal(curvesUrl)})`);
+    curveSummary = (await coordinator.query("SELECT * FROM curve_summary_table", { type: "json" })) as CurveSummaryRow[];
     await coordinator.exec(`
       CREATE OR REPLACE TABLE display_points AS
       WITH required_points AS (
@@ -360,8 +451,64 @@
               <div class="metric"><strong>{formatNumber(activeRun.median_recon_loss)}</strong><span>median loss</span></div>
               {#if activeRun.method === "dpp"}<div class="metric"><strong>{formatNumber(activeRun.baseline_jaccard)}</strong><span>baseline Jaccard</span></div><div class="metric"><strong>{formatNumber(activeRun.adjacent_jaccard)}</strong><span>adjacent Jaccard</span></div>{/if}
             </div>
-            {#if tradeoffRuns.length > 1}
-              <div class="tradeoff"><h3>Vendi / loss sweep</h3><svg viewBox="0 0 220 130" role="img" aria-label="Vendi versus reconstruction loss trade-off"><line x1="22" y1="8" x2="22" y2="108" /><line x1="22" y1="108" x2="214" y2="108" /><polyline points={tradeoffRuns.map((run) => `${22 + ((run.vendi_score - vendiMin) / Math.max(vendiMax - vendiMin, 1e-9)) * 192},${108 - ((run.mean_recon_loss - lossMin) / Math.max(lossMax - lossMin, 1e-9)) * 96}`).join(" ")} />{#each tradeoffRuns as run}<circle cx={22 + ((run.vendi_score - vendiMin) / Math.max(vendiMax - vendiMin, 1e-9)) * 192} cy={108 - ((run.mean_recon_loss - lossMin) / Math.max(lossMax - lossMin, 1e-9)) * 96} r={run.run_id === activeRun.run_id ? 5 : 3} class:current={run.run_id === activeRun.run_id} />{/each}</svg><div class="axis-labels"><span>Vendi →</span><span>loss ↑</span></div><small>{activeRun.kernel_method === "multiplicative" ? "Higher w emphasizes ranking utility." : "Higher w emphasizes interaction/diversity."}</small></div>
+            {#snippet operatingCurveChart(title: string, points: ChartPoint[], baselinePoint: BaselinePoint | null, xAxisLabel: string, note: string)}
+              <div class="tradeoff">
+                <h4>{title} / loss</h4>
+                <svg viewBox="0 0 220 130" role="img" aria-label="{title} versus mean reconstruction loss: DPP operating curve versus stratified baseline, aggregated across recordings">
+                  <line x1="22" y1="8" x2="22" y2="108" />
+                  <line x1="22" y1="108" x2="214" y2="108" />
+                  {#if baselinePoint}
+                    <line class="baseline-guide" x1="22" y1={baselinePoint.y} x2="214" y2={baselinePoint.y} />
+                    <line class="baseline-guide" x1={baselinePoint.x} y1="8" x2={baselinePoint.x} y2="108" />
+                  {/if}
+                  <polyline class="curve-line" points={points.map((point) => `${point.x},${point.y}`).join(" ")} />
+                  {#each points as point}
+                    <circle class="curve-point" class:current={point.current} cx={point.x} cy={point.y} r={point.r}><title>{point.tooltip}</title></circle>
+                  {/each}
+                  {#if baselinePoint}
+                    <line class="baseline-whisker" x1={baselinePoint.xLo} y1={baselinePoint.y} x2={baselinePoint.xHi} y2={baselinePoint.y} />
+                    <line class="baseline-whisker" x1={baselinePoint.x} y1={baselinePoint.yLo} x2={baselinePoint.x} y2={baselinePoint.yHi} />
+                    <rect
+                      class="baseline-marker"
+                      x={baselinePoint.x - 4}
+                      y={baselinePoint.y - 4}
+                      width="8" height="8"
+                      transform={`rotate(45 ${baselinePoint.x} ${baselinePoint.y})`}
+                    ><title>{baselinePoint.tooltip}</title></rect>
+                  {/if}
+                </svg>
+                <div class="axis-labels"><span>{xAxisLabel}</span><span>loss ↑</span></div>
+                <ul class="legend">
+                  <li><span class="swatch curve"></span>DPP sweep ({activeRun.kernel_method})</li>
+                  {#if baselinePoint}<li><span class="swatch baseline"></span>Stratified baseline</li>{/if}
+                </ul>
+                <small>{note}</small>
+              </div>
+            {/snippet}
+            {#if operatingCurve.length > 1}
+              <div class="tradeoff-group">
+                <div class="tradeoff-header">
+                  <h3>Operating curves</h3>
+                  {#if strataBaseline}
+                    <label class="baseline-toggle"><input type="checkbox" bind:checked={showBaseline} /> Show baseline</label>
+                  {/if}
+                </div>
+                {@render operatingCurveChart(
+                  "Vendi diversity",
+                  vendiChartPoints,
+                  vendiBaselinePoint,
+                  "Vendi diversity →",
+                  activeRun.kernel_method === "multiplicative" ? "Higher w emphasizes ranking utility." : "Higher w emphasizes interaction/diversity.",
+                )}
+                {@render operatingCurveChart(
+                  "Cosine similarity",
+                  cosineChartPoints,
+                  cosineBaselinePoint,
+                  "← more diverse · cosine similarity · less diverse →",
+                  "Mean pairwise cosine of selected rows; lower means more diverse.",
+                )}
+                {#if strataBaseline}<small class="baseline-note">Baseline whiskers show the interquartile range across recordings.</small>{/if}
+              </div>
             {/if}
           </div>
         {/if}
@@ -421,6 +568,7 @@
     --hero-text: #202d91;
     --accent: #5665ff;
     --accent-strong: #4c5cf4;
+    --curve-baseline: #008300;
     --shadow: rgb(22 32 51 / 12%);
     --status-card-bg: rgb(255 255 255 / 92%);
     --run-id-text: #8792a7;
@@ -479,11 +627,27 @@
   .metric span, small, .axis-labels { color: var(--text-soft); font-size: 0.65rem; }
   .metric.hero { grid-column: 1 / -1; padding: 0.7rem; border-radius: 0.45rem; background: var(--hero-bg); }
   .metric.hero strong { font-size: 1.5rem; }
+  .tradeoff-group { margin-top: 1.25rem; }
+  .tradeoff-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+  .tradeoff-header h3 { margin: 0; }
+  .baseline-toggle { display: flex; align-items: center; gap: 0.3rem; color: var(--text-soft); font-size: 0.65rem; font-weight: 400; letter-spacing: normal; text-transform: none; }
+  .baseline-toggle input { accent-color: var(--curve-baseline); }
+  .baseline-note { display: block; margin-top: 0.35rem; }
+  .tradeoff { margin-top: 0.75rem; }
+  .tradeoff h4 { margin: 0 0 0.3rem; color: var(--text-muted); font-size: 0.68rem; font-weight: 600; text-transform: none; }
   .tradeoff svg { display: block; width: 100%; height: 8rem; overflow: visible; }
   .tradeoff line { stroke: var(--input-border); stroke-width: 1; }
-  .tradeoff polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; }
-  .tradeoff circle { fill: var(--accent); }
-  .tradeoff circle.current { fill: var(--eyebrow); stroke: var(--panel-bg); stroke-width: 1.5; }
+  .tradeoff line.baseline-guide { stroke: var(--curve-baseline); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0.55; }
+  .tradeoff line.baseline-whisker { stroke: var(--curve-baseline); stroke-width: 1.25; }
+  .tradeoff polyline.curve-line { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+  .tradeoff circle.curve-point { fill: var(--accent); }
+  .tradeoff circle.curve-point.current { fill: var(--eyebrow); stroke: var(--panel-bg); stroke-width: 1.5; }
+  .tradeoff rect.baseline-marker { fill: var(--curve-baseline); stroke: var(--panel-bg); stroke-width: 1; }
+  .tradeoff .legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0.5rem 0 0.35rem; padding: 0; list-style: none; color: var(--text-muted); font-size: 0.65rem; }
+  .tradeoff .legend li { display: flex; align-items: center; gap: 0.3rem; }
+  .tradeoff .swatch { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 0.15rem; }
+  .tradeoff .swatch.curve { background: var(--accent); }
+  .tradeoff .swatch.baseline { background: var(--curve-baseline); transform: rotate(45deg); }
   .axis-labels { display: flex; justify-content: space-between; }
   .status { box-sizing: border-box; display: grid; width: 100%; height: 100%; place-items: center; padding: 2rem; background: radial-gradient(circle at 20% 20%, rgb(86 101 255 / 14%), transparent 32rem), radial-gradient(circle at 80% 70%, rgb(34 197 175 / 12%), transparent 28rem), var(--bg); }
   .status-card { width: min(42rem, 100%); padding: 2.5rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--status-card-bg); box-shadow: 0 1.25rem 4rem var(--shadow); }

@@ -11,11 +11,14 @@
 
 ## Selection experiments
 
-- Rank globally and within each recording in both directions: lowest-loss
-  (“top”) and highest-loss (“bottom”). Use candidate pools of 5,000 globally
-  and 256 per recording, with `window_id` ascending as the exact tie-break.
-- For recordings 42 and 442, select 32 windows from each 256-window candidate
-  pool with all-start greedy MAP DPP.
+- Use the deterministic `display.parquet` population as the full experiment
+  population for the public demo.
+- Run separate 1% and 10% retention experiments, independently for highest-loss
+  (`top`) and lowest-loss (`bottom`) rankings within every
+  `big_recording_index`; ties use `window_id` ascending.
+- For each ranking configuration, run DPP selection inside each recording index
+  using every display row in that index as the candidate pool. Derive the final
+  cardinality as `max(1, ceil(selection_eta * candidate_pool_size))`.
 - Sweep interaction weights for both multiplicative and additive quality-
   diversity kernels. Weight zero is the unweighted diversity baseline.
 - Record selected memberships, marginal log-determinant gains, reconstruction
