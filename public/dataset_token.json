@@ -9,6 +9,7 @@
         "timing": "Active, Asynchronous",
         "population_age": "AgeUnknown",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -21,6 +22,7 @@
         "timing": "Reactive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "dry"
     },
     {
@@ -33,6 +35,7 @@
         "timing": "Reactive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "dry"
     },
     {
@@ -45,6 +48,7 @@
         "timing": "Reactive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI, Social Interaction",
         "electrode_type": "dry"
     },
     {
@@ -57,6 +61,7 @@
         "timing": "Reactive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI, Social Interaction",
         "electrode_type": "dry"
     },
     {
@@ -69,6 +74,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -81,6 +87,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -93,6 +100,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -105,6 +113,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -117,6 +126,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -129,6 +139,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -141,6 +152,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -153,6 +165,7 @@
         "timing": "Active, Asynchronous",
         "population_age": "AgeUnknown",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -165,6 +178,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -177,6 +191,7 @@
         "timing": "Passive",
         "population_age": "Adult",
         "population_health": "Unhealthy, Cardiac",
+        "study_type": "Clinical",
         "electrode_type": "wet"
     },
     {
@@ -189,6 +204,7 @@
         "timing": "Active, Asynchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -201,6 +217,7 @@
         "timing": "Reactive, Synchronous",
         "population_age": "AgeUnknown",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "Unknown"
     },
     {
@@ -213,6 +230,7 @@
         "timing": "Reactive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -225,6 +243,7 @@
         "timing": "Active, Asynchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -237,6 +256,7 @@
         "timing": "Reactive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -249,6 +269,7 @@
         "timing": "Active, Asynchronous",
         "population_age": "Adult",
         "population_health": "Unhealthy, Stroke",
+        "study_type": "BCI",
         "electrode_type": "sponge"
     },
     {
@@ -261,6 +282,7 @@
         "timing": null,
         "population_age": "Adult, Child",
         "population_health": "Healthy, Unhealthy",
+        "study_type": "Clinical",
         "electrode_type": "Unknown"
     },
     {
@@ -273,6 +295,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -285,6 +308,7 @@
         "timing": "Passive, Asynchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Neuro modulation",
         "electrode_type": "wet"
     },
     {
@@ -297,6 +321,7 @@
         "timing": "Reactive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -309,6 +334,7 @@
         "timing": "Synchronous, Passive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -321,6 +347,7 @@
         "timing": "Passive",
         "population_age": "Adult, Elderly",
         "population_health": "Healthy, Unhealthy, Parkinson",
+        "study_type": "Clinical",
         "electrode_type": "wet"
     },
     {
@@ -333,6 +360,7 @@
         "timing": "Asynchronous, Active",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -345,6 +373,7 @@
         "timing": "Synchronous, Reactive, Passive",
         "population_age": "Adult, Elderly",
         "population_health": "Healthy",
+        "study_type": "Cognitive, Biometry",
         "electrode_type": "wet"
     },
     {
@@ -357,6 +386,7 @@
         "timing": "Passive",
         "population_age": "Adult, Elderly",
         "population_health": "Healthy",
+        "study_type": "Biometry",
         "electrode_type": "wet"
     },
     {
@@ -369,6 +399,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -381,6 +412,7 @@
         "timing": "Asynchronous, Active, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI, Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -393,6 +425,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -405,6 +438,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -417,6 +451,7 @@
         "timing": "Asynchronous, Active",
         "population_age": "Adult, Elderly",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -429,6 +464,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -441,6 +477,7 @@
         "timing": "Synchronous, Active",
         "population_age": "Adult, Elderly",
         "population_health": "Healthy",
+        "study_type": "Economics, Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -453,6 +490,7 @@
         "timing": "Asynchronous, Active, Passive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -465,6 +503,7 @@
         "timing": "Synchronous, Active",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -477,6 +516,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -489,6 +529,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -501,6 +542,7 @@
         "timing": "Synchronous, Active",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "Unknown"
     },
     {
@@ -513,6 +555,7 @@
         "timing": "Reactive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive, Economics",
         "electrode_type": "sponge"
     },
     {
@@ -525,6 +568,7 @@
         "timing": "Reactive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -537,6 +581,7 @@
         "timing": "Reactive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "sponge"
     },
     {
@@ -549,6 +594,7 @@
         "timing": "Passive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -561,6 +607,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -573,6 +620,7 @@
         "timing": "Synchronous, Active",
         "population_age": "Adult, Elderly",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "sponge"
     },
     {
@@ -585,6 +633,7 @@
         "timing": "Passive, Synchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -597,6 +646,7 @@
         "timing": "Asynchronous, Active",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Economics, Social Interaction",
         "electrode_type": "wet"
     },
     {
@@ -609,6 +659,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -621,6 +672,7 @@
         "timing": "Passive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive, Hypnosis",
         "electrode_type": "wet"
     },
     {
@@ -633,6 +685,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -645,6 +698,7 @@
         "timing": "Synchronous, Passive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -657,6 +711,7 @@
         "timing": "Synchronous, Active",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -669,6 +724,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -681,6 +737,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -693,6 +750,7 @@
         "timing": "Passive",
         "population_age": "Adult",
         "population_health": "Unhealthy, Burnt",
+        "study_type": "Clinical",
         "electrode_type": "wet"
     },
     {
@@ -705,6 +763,7 @@
         "timing": "Passive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Monitoring",
         "electrode_type": "wet"
     },
     {
@@ -717,6 +776,7 @@
         "timing": "Synchronous, Active",
         "population_age": "Adult",
         "population_health": "Unhealthy, Blind",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -729,6 +789,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -741,6 +802,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -753,6 +815,7 @@
         "timing": "Synchronous, Passive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -765,6 +828,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -777,6 +841,7 @@
         "timing": "Synchronous, Active",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "dry"
     },
     {
@@ -789,6 +854,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -801,6 +867,7 @@
         "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
         "population_age": "Adult, Child",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "sponge"
     },
     {
@@ -813,6 +880,7 @@
         "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
         "population_age": "Adult, Child",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "sponge"
     },
     {
@@ -825,6 +893,7 @@
         "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
         "population_age": "Adult, Child",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "sponge"
     },
     {
@@ -837,6 +906,7 @@
         "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
         "population_age": "Adult, Child",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "sponge"
     },
     {
@@ -849,6 +919,7 @@
         "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
         "population_age": "Adult, Child",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "sponge"
     },
     {
@@ -861,6 +932,7 @@
         "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
         "population_age": "Adult, Child",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "sponge"
     },
     {
@@ -873,6 +945,7 @@
         "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
         "population_age": "Adult, Child",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "sponge"
     },
     {
@@ -885,6 +958,7 @@
         "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
         "population_age": "Adult, Child",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "sponge"
     },
     {
@@ -897,6 +971,7 @@
         "timing": "Synchronous, Asynchronous, Passive, Reactive, Active",
         "population_age": "Adult, Child",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "sponge"
     },
     {
@@ -909,6 +984,7 @@
         "timing": "Synchronous, Passive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -921,6 +997,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -933,6 +1010,7 @@
         "timing": "Synchronous, Asynchronous, Passive",
         "population_age": "Adult",
         "population_health": "Healthy, Sedated",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -945,6 +1023,7 @@
         "timing": "Synchronous, Passive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -957,6 +1036,7 @@
         "timing": "Active, Asynchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -969,6 +1049,7 @@
         "timing": "Active, Asynchronous",
         "population_age": "AgeUnknown",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -981,6 +1062,7 @@
         "timing": "Active, Asynchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -993,6 +1075,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -1005,6 +1088,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -1017,6 +1101,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -1029,6 +1114,7 @@
         "timing": "Synchronous, Reactive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     },
     {
@@ -1041,6 +1127,7 @@
         "timing": "Unknown",
         "population_age": "Unknown",
         "population_health": "Unknown",
+        "study_type": "Unknown",
         "electrode_type": "Unknown"
     },
     {
@@ -1053,6 +1140,7 @@
         "timing": "Active, Asynchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -1065,6 +1153,7 @@
         "timing": "Active, Asynchronous",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "BCI",
         "electrode_type": "wet"
     },
     {
@@ -1077,6 +1166,7 @@
         "timing": "Passive",
         "population_age": "Adult",
         "population_health": "Unhealthy, Epilepsy, Encephalopathy, Other pathology",
+        "study_type": "Clinical",
         "electrode_type": "Unknown"
     },
     {
@@ -1089,6 +1179,7 @@
         "timing": "Passive",
         "population_age": "Adult",
         "population_health": "Unhealthy, Epilepsy",
+        "study_type": "Clinical",
         "electrode_type": "wet"
     },
     {
@@ -1101,6 +1192,7 @@
         "timing": "Synchronous, Passive",
         "population_age": "Adult",
         "population_health": "Healthy",
+        "study_type": "Cognitive",
         "electrode_type": "wet"
     }
 ]
