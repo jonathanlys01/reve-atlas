@@ -36,7 +36,7 @@
         "population_age": "Adult",
         "population_health": "Healthy",
         "study_type": "BCI",
-        "electrode_type": "dry"
+        "electrode_type": "wet"
     },
     {
         "dataset": "BI2015a",
@@ -49,7 +49,7 @@
         "population_age": "Adult",
         "population_health": "Healthy",
         "study_type": "BCI, Social Interaction",
-        "electrode_type": "dry"
+        "electrode_type": "wet"
     },
     {
         "dataset": "BI2015b",
@@ -62,7 +62,7 @@
         "population_age": "Adult",
         "population_health": "Healthy",
         "study_type": "BCI, Social Interaction",
-        "electrode_type": "dry"
+        "electrode_type": "wet"
     },
     {
         "dataset": "BNCI2014_001",
@@ -279,7 +279,7 @@
         "task_structure": "No",
         "stimulation": "No",
         "task": "No task",
-        "timing": null,
+        "timing": "Unknown",
         "population_age": "Adult, Child",
         "population_health": "Healthy, Unhealthy",
         "study_type": "Clinical",
