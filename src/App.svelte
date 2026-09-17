@@ -97,12 +97,22 @@
       ELSE 'Others HI (> 64 ch)'
     END
   ) AS channel_group`;
-  // dataset_classes.task_modality/domain are comma-separated tag strings (a recording can carry
-  // several tags at once). Keep them as plain strings on the table (embedding-atlas's default
-  // per-column chart machinery doesn't handle LIST-typed columns well) and match individual tags
-  // with list_contains(string_split(...)) inline in the quick-filter predicates below instead.
-  const DOMAIN_TAGS = ["BCI", "Clinical", "Cognitive", "Evoked Response", "Internal State", "Sleep"];
-  const TASK_MODALITY_TAGS = ["Auditory", "Clinical", "Cognitive", "Haptic", "Motor", "Passive", "Sleep", "Visual"];
+  // Every dataset_classes column other than "dataset" is a label column discovered at load time, so
+  // adding a label only means adding a key to dataset_token.json. Multi-tag columns are comma-separated
+  // strings (a recording can carry several tags at once): keep them as plain strings on the table
+  // (embedding-atlas's default per-column chart machinery doesn't handle LIST-typed columns well) and
+  // match individual tags with list_contains(string_split(...)) in the quick-filter predicates instead.
+  const TAG_SEPARATOR = ", ";
+  type PredicateChart = { type: "predicates"; title: string; items: { name: string; predicate: string }[] };
+  let labelColumns: string[] = [];
+  let labelCharts: Record<string, PredicateChart> = {};
+  function quoteIdent(name: string): string {
+    return `"${name.replace(/"/g, '""')}"`;
+  }
+  function chartTitle(column: string): string {
+    const words = column.replace(/_/g, " ");
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  }
   const DPP_FILTERS = [
     { key: "eta_001_multiplicative", eta: 0.01, etaLabel: "1%", kernel: "multiplicative", kernelLabel: "Multiplicative" },
     { key: "eta_001_additive", eta: 0.01, etaLabel: "1%", kernel: "additive", kernelLabel: "Additive" },
@@ -116,7 +126,7 @@
   function tagPredicateItems(column: string, tags: string[]) {
     return tags.map((tag) => ({
       name: tag,
-      predicate: `list_contains(string_split(${column}, ', '), '${tag}')`,
+      predicate: `list_contains(string_split(${quoteIdent(column)}, ${SQL.literal(TAG_SEPARATOR)}), ${SQL.literal(tag)})`,
     }));
   }
   const DISPLAY_POINT_CAP = 2_000_000;
@@ -322,19 +332,84 @@
     }
   }
 
+  async function describeColumns(relation: string): Promise<{ column_name: string; column_type: string }[]> {
+    return (await coordinator.query(`SELECT column_name, column_type FROM (DESCRIBE ${relation})`, {
+      type: "json",
+    })) as { column_name: string; column_type: string }[];
+  }
+
+  // Reads dataset_token.json, keeps every column beside "dataset" as a label column, and derives the
+  // quick-filter tag lists from the file itself so new labels need no matching code change here.
+  async function loadDatasetClasses(): Promise<void> {
+    await coordinator.exec(
+      `CREATE OR REPLACE TABLE dataset_classes_raw AS SELECT * FROM read_json_auto(${SQL.literal(datasetTokenUrl)})`,
+    );
+    const atlasColumns = new Set((await describeColumns("atlas_source")).map((column) => column.column_name));
+    const candidates = (await describeColumns("dataset_classes_raw")).filter(
+      (column) => column.column_name !== "dataset",
+    );
+    const shadowed = candidates.filter((column) => atlasColumns.has(column.column_name));
+    if (shadowed.length) {
+      console.warn(
+        `Ignoring dataset_token.json columns that already exist on the atlas table: ${shadowed.map((column) => column.column_name).join(", ")}`,
+      );
+    }
+    const labels = candidates.filter((column) => !atlasColumns.has(column.column_name));
+    // Canonicalize hand-edited separators ("A,B" or "A ,  B" -> "A, B") so tag extraction and the
+    // list_contains predicates agree on where one tag ends and the next begins.
+    const projected = labels.map((column) =>
+      column.column_type === "VARCHAR"
+        ? `regexp_replace(trim(${quoteIdent(column.column_name)}), '\\s*,\\s*', ${SQL.literal(TAG_SEPARATOR)}, 'g') AS ${quoteIdent(column.column_name)}`
+        : quoteIdent(column.column_name),
+    );
+    await coordinator.exec(`
+      CREATE OR REPLACE TABLE dataset_classes AS
+      SELECT dataset${projected.length ? `, ${projected.join(", ")}` : ""} FROM dataset_classes_raw
+    `);
+    labelColumns = labels.map((column) => column.column_name);
+    const charts: Record<string, PredicateChart> = {};
+    for (const column of labels.filter((item) => item.column_type === "VARCHAR")) {
+      const name = quoteIdent(column.column_name);
+      const split = `string_split(${name}, ${SQL.literal(TAG_SEPARATOR)})`;
+      const tagRows = (await coordinator.query(
+        `
+        SELECT tag, max(tag_count) AS tag_count FROM (
+          SELECT unnest(${split}) AS tag, len(${split}) AS tag_count
+          FROM dataset_classes WHERE ${name} IS NOT NULL AND ${name} <> ''
+        ) GROUP BY tag ORDER BY tag
+      `,
+        { type: "json" },
+      )) as { tag: string; tag_count: number }[];
+      // Single-valued columns keep embedding-atlas's own categorical chart; only genuinely multi-tag
+      // columns need the list_contains quick filters.
+      if (tagRows.some((row) => Number(row.tag_count) > 1)) {
+        charts[column.column_name] = {
+          type: "predicates",
+          title: chartTitle(column.column_name),
+          items: tagPredicateItems(
+            column.column_name,
+            tagRows.map((row) => row.tag),
+          ),
+        };
+      }
+    }
+    labelCharts = charts;
+  }
+
   async function initialize(): Promise<void> {
     const wasm = await wasmConnector();
     dbConnector = wasm;
     coordinator.databaseConnector(wasm);
     await coordinator.exec(`CREATE OR REPLACE VIEW atlas_source AS SELECT * FROM read_parquet(${SQL.literal(atlasUrl)})`);
-    // Small per-dataset lookup (task modality / domain), joined onto "dataset" — not worth
-    // duplicating into the main parquet since it only varies per dataset, not per point.
-    await coordinator.exec(`CREATE OR REPLACE TABLE dataset_classes AS SELECT * FROM read_json_auto(${SQL.literal(datasetTokenUrl)})`);
+    // Small per-dataset lookup (task modality, domain, any further label), joined onto "dataset" —
+    // not worth duplicating into the main parquet since it only varies per dataset, not per point.
+    await loadDatasetClasses();
+    const labelSelect = labelColumns.map((column) => `dataset_classes.${quoteIdent(column)}, `).join("");
     realMode = Boolean(selectionsUrl && runsUrl);
     if (!realMode) {
       await coordinator.exec(`
         CREATE OR REPLACE TABLE display_points AS
-        SELECT atlas_source.*, dataset_classes.task_modality, dataset_classes.domain, ${POINT_LABEL_SQL}, ${CHANNEL_GROUP_SQL}
+        SELECT atlas_source.*, ${labelSelect}${POINT_LABEL_SQL}, ${CHANNEL_GROUP_SQL}
         FROM atlas_source
         LEFT JOIN dataset_classes USING (dataset)
         WHERE hash(row_id) % 100 < 8
@@ -379,7 +454,7 @@
           AND NOT EXISTS (SELECT 1 FROM required_points WHERE required_points.row_id = atlas_source.row_id)
         LIMIT ${DISPLAY_SAMPLE_CAP}
       )
-      SELECT combined.*, dataset_classes.task_modality, dataset_classes.domain, ${POINT_LABEL_SQL}, ${CHANNEL_GROUP_SQL} FROM (
+      SELECT combined.*, ${labelSelect}${POINT_LABEL_SQL}, ${CHANNEL_GROUP_SQL} FROM (
         SELECT * FROM required_points
         UNION ALL
         SELECT * FROM sampled_points
@@ -723,9 +798,11 @@
           {coordinator}
           data={{ table: realMode ? activeTableName : "display_points", id: "row_id", text: "point_label", projection: { x: "projection_x", y: "projection_y" } }}
           defaultChartsConfig={{
-            include: realMode
-              ? ["recon_loss", "dataset", "n_channels", "modality", "task_modality", "domain", "big_recording_index"]
-              : ["recon_loss", "dataset", "n_channels", "modality", "task_modality", "domain"],
+            include: [
+              "recon_loss", "dataset", "n_channels", "modality",
+              ...labelColumns,
+              ...(realMode ? ["big_recording_index"] : []),
+            ],
             override: {
               n_channels: {
                 type: "predicates",
@@ -740,8 +817,7 @@
                   { name: "MEG only", predicate: "modality = 'MEG'" },
                 ],
               },
-              task_modality: { type: "predicates", title: "Task modality", items: tagPredicateItems("task_modality", TASK_MODALITY_TAGS) },
-              domain: { type: "predicates", title: "Domain", items: tagPredicateItems("domain", DOMAIN_TAGS) },
+              ...labelCharts,
             },
             embedding: { data: { x: "projection_x", y: "projection_y", text: "point_label", category: "dataset" } },
             table: false,
