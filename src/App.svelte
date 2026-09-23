@@ -2,6 +2,7 @@
   import { Coordinator, wasmConnector } from "@uwdata/mosaic-core";
   import * as SQL from "@uwdata/mosaic-sql";
   import { EmbeddingAtlas } from "embedding-atlas/svelte";
+  import { parseClusteredRun, verifyClusteredMemberships, type ClusteredRun } from "./clusteredRun";
 
   type Method = "ranking" | "dpp";
   type Scope = "global" | "per_recording";
@@ -62,6 +63,11 @@
   const selectionsUrl = import.meta.env.VITE_ATLAS_SELECTIONS_URL ?? DEFAULT_SELECTIONS_URL;
   const runsUrl = import.meta.env.VITE_ATLAS_RUNS_URL ?? DEFAULT_RUNS_URL;
   const curvesUrl = import.meta.env.VITE_ATLAS_CURVES_URL ?? DEFAULT_CURVES_URL;
+  const clusteredRunUrl = import.meta.env.VITE_ATLAS_CLUSTERED_RUN_URL ??
+    (atlasUrl === DEFAULT_ATLAS_URL
+      ? "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/clustered_run.json"
+      : "");
+  const clusteredManifestUrl = clusteredRunUrl ? new URL("clustered_manifest.txt?download=true", clusteredRunUrl).toString() : "";
   const datasetTokenUrl = new URL(`${import.meta.env.BASE_URL}dataset_token.json`, window.location.href).toString();
   const REQUIRED_COLUMNS = [
     "row_id", "window_id", "projection_x", "projection_y", "recon_loss",
@@ -140,6 +146,9 @@
   let curveSummary: CurveSummaryRow[] = [];
   let railTab: "explore" | "curves" = "explore";
   let activeTableName = "";
+  let clusteredRun: ClusteredRun | null = null;
+  let clusteredError = "";
+  let atlasSelectionStrategy: "recording" | "clustered" = "recording";
   let atlasDppMode: "all" | "selected" = "all";
   let atlasDppDirection: "top" | "bottom" = "bottom";
   let atlasDppEta: Eta = "eta_010";
@@ -166,11 +175,15 @@
       item.eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) && item.kernel === atlasDppKernel);
     const weightIndex = resetWeight ? 0 : Math.min(atlasWIndex, Math.max(0, atlasWValues.length - 1));
     const value = atlasWValues[weightIndex] ?? null;
+    const clustered = atlasSelectionStrategy === "clustered";
     group.selection.update({
       source: atlasDppFilterSource,
-      value: atlasDppMode === "selected" ? { direction: atlasDppDirection, eta: atlasDppEta, kernel: atlasDppKernel, w: value } : null,
-      predicate: atlasDppMode === "selected" && filter && value !== null
-        ? SQL.listContains(dppColumn(atlasDppDirection, filter), value)
+      value: atlasDppMode === "selected"
+        ? { strategy: atlasSelectionStrategy, direction: atlasDppDirection, eta: atlasDppEta, kernel: atlasDppKernel, w: value }
+        : null,
+      predicate: atlasDppMode !== "selected" ? null
+        : clustered && clusteredRun ? SQL.eq(SQL.column("clustered_selected"), true)
+        : !clustered && filter && value !== null ? SQL.listContains(dppColumn(atlasDppDirection, filter), value)
         : null,
     });
   }
@@ -396,6 +409,42 @@
     labelCharts = charts;
   }
 
+  async function loadClusteredOverlay(wasm: Awaited<ReturnType<typeof wasmConnector>>): Promise<void> {
+    await coordinator.exec("CREATE OR REPLACE TABLE clustered_memberships (row_id VARCHAR)");
+    if (!clusteredRunUrl) return;
+    try {
+      const response = await fetch(clusteredRunUrl, { cache: "no-store" });
+      if (response.status === 404) return; // An older publication remains fully usable.
+      if (!response.ok) throw new Error(`Clustered run metadata: HTTP ${response.status}`);
+      const run = parseClusteredRun(await response.json());
+      const membershipUrl = new URL("clustered_selections.parquet", clusteredRunUrl).toString();
+      const membershipResponse = await fetch(membershipUrl, { cache: "no-store" });
+      if (!membershipResponse.ok) throw new Error(`Clustered memberships: HTTP ${membershipResponse.status}`);
+      const bytes = new Uint8Array(await membershipResponse.arrayBuffer());
+      await verifyClusteredMemberships(bytes, run.memberships_sha256);
+      const duckdb = await wasm.getDuckDB();
+      await duckdb.registerFileBuffer("clustered_selections.parquet", bytes);
+      await coordinator.exec(`CREATE OR REPLACE TABLE clustered_memberships AS
+        SELECT row_id FROM read_parquet('clustered_selections.parquet')`);
+      const rows = await coordinator.query(`SELECT count(*)::INTEGER AS total, count(DISTINCT row_id)::INTEGER AS unique_ids,
+        count(*) FILTER (WHERE row_id IS NULL)::INTEGER AS null_ids FROM clustered_memberships`, { type: "json" }) as
+        {total: number; unique_ids: number; null_ids: number}[];
+      if (rows[0].total !== run.display_selected_rows || rows[0].unique_ids !== rows[0].total || rows[0].null_ids) {
+        throw new Error("Clustered display count or uniqueness check failed");
+      }
+      const population = await coordinator.query(`SELECT count(*)::INTEGER AS total FROM atlas_source`, {type: "json"}) as {total: number}[];
+      const missing = await coordinator.query(`SELECT count(*)::INTEGER AS total FROM clustered_memberships
+        WHERE NOT EXISTS (SELECT 1 FROM atlas_source WHERE atlas_source.row_id = clustered_memberships.row_id)`, {type: "json"}) as {total: number}[];
+      if (population[0].total !== run.display_rows || missing[0].total !== 0) {
+        throw new Error("Clustered overlay belongs to a different display population");
+      }
+      clusteredRun = run;
+    } catch (error) {
+      clusteredError = error instanceof Error ? error.message : String(error);
+      await coordinator.exec("CREATE OR REPLACE TABLE clustered_memberships (row_id VARCHAR)");
+    }
+  }
+
   async function initialize(): Promise<void> {
     const wasm = await wasmConnector();
     dbConnector = wasm;
@@ -441,12 +490,13 @@
     `);
     await coordinator.exec(`CREATE OR REPLACE TABLE curve_summary_table AS SELECT * FROM read_parquet(${SQL.literal(curvesUrl)})`);
     curveSummary = (await coordinator.query("SELECT * FROM curve_summary_table", { type: "json" })) as CurveSummaryRow[];
+    await loadClusteredOverlay(wasm);
     await coordinator.exec(`
       CREATE OR REPLACE TABLE display_points AS
       WITH required_points AS (
         SELECT DISTINCT atlas_source.*
         FROM atlas_source
-        INNER JOIN (SELECT DISTINCT row_id FROM selection_memberships) AS members USING (row_id)
+        INNER JOIN (SELECT row_id FROM selection_memberships UNION SELECT row_id FROM clustered_memberships) AS members USING (row_id)
       ), sampled_points AS (
         SELECT atlas_source.*
         FROM atlas_source
@@ -491,9 +541,11 @@
     `);
     await coordinator.exec(`
       CREATE OR REPLACE TABLE display_points_with_dpp AS
-      SELECT display_points.*, ${membershipColumns}
+      SELECT display_points.*, ${membershipColumns},
+        (clustered_memberships.row_id IS NOT NULL) AS clustered_selected
       FROM display_points
       LEFT JOIN dpp_memberships USING (row_id)
+      LEFT JOIN clustered_memberships USING (row_id)
     `);
     activeTableName = "display_points_with_dpp";
   }
@@ -551,9 +603,9 @@
             <button type="button" role="tab" class:active={railTab === "curves"} aria-selected={railTab === "curves"} disabled={curveMultiplicative.length <= 1 && curveAdditive.length <= 1} onclick={() => railTab = "curves"}>Operating curves</button>
           </div>
           {#if railTab === "explore"}
-            <p class="display-note">Display cap: about 2M points; all selection members are retained.</p>
+            <p class="display-note">Display: a fixed sample of about 2M points. Full-corpus totals are reported separately.</p>
             <p class="explore-note">Filter the stable atlas by any precomputed DPP selection. These controls preserve the canvas and combine with the atlas charts.</p>
-            {#if atlasMultiplicativePoints.length > 1 || atlasAdditivePoints.length > 1}
+            {#if atlasSelectionStrategy === "recording" && (atlasMultiplicativePoints.length > 1 || atlasAdditivePoints.length > 1)}
               <div class="mini-curve">
                 <div class="mini-curve-header">
                   <h3>Vendi diversity / loss</h3>
@@ -639,7 +691,21 @@
               </div>
             {/if}
             <div class="control-stack dpp-controls">
+              <label>Selection strategy
+                <select bind:value={atlasSelectionStrategy} onchange={() => applyAtlasDppFilter()}>
+                  <option value="recording">Per-recording DPP sweep</option>
+                  {#if clusteredRun}<option value="clustered">Full-corpus clustered DPP</option>{/if}
+                </select>
+              </label>
               <label>Points<select bind:value={atlasDppMode} onchange={() => applyAtlasDppFilter()}><option value="all">All points</option><option value="selected">Selected only</option></select></label>
+              {#if atlasSelectionStrategy === "clustered" && clusteredRun}
+                <div class="clustered-summary">
+                  <p><strong>{clusteredRun.selected_rows.toLocaleString()}</strong> of {clusteredRun.source_rows.toLocaleString()} windows selected across the full corpus.</p>
+                  <p>Groups of {clusteredRun.group_size.toLocaleString()}, keeping {clusteredRun.keep_per_group.toLocaleString()} each; the final short group uses proportional retention.</p>
+                  <p>{clusteredRun.display_selected_rows.toLocaleString()} selected windows are in this display sample. Chart filters may narrow it further.</p>
+                  <a href={clusteredManifestUrl} target="_blank" rel="noreferrer">Download the complete window manifest</a>
+                </div>
+              {:else}
               <div class="compact-controls">
                 <label>Direction<select bind:value={atlasDppDirection} onchange={() => applyAtlasDppFilter(true)}><option value="bottom">Bottom loss</option><option value="top">Top loss</option></select></label>
                 <label>Candidate pool<select bind:value={atlasDppEta} onchange={() => applyAtlasDppFilter(true)}><option value="eta_010">10%</option><option value="eta_001">1%</option></select></label>
@@ -649,6 +715,8 @@
                 <input type="range" min="0" max={Math.max(0, atlasWValues.length - 1)} step="1" bind:value={atlasWIndex} oninput={() => applyAtlasDppFilter()} disabled={atlasDppMode === "all" || atlasWValues.length <= 1} />
                 <span class="sweep-value">{atlasWValue === null ? "—" : `w=${atlasWValue}`}</span>
               </label>
+              {/if}
+              {#if clusteredError}<p class="view-note">Clustered selection unavailable: {clusteredError}</p>{/if}
             </div>
           {/if}
         </div>
@@ -908,6 +976,8 @@
   .eyebrow { margin-bottom: 0.45rem; color: var(--eyebrow); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
   .control-stack { display: grid; gap: 0.75rem; }
   .compact-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+  .clustered-summary { display: grid; gap: 0.65rem; font-size: 0.78rem; line-height: 1.45; }
+  .clustered-summary a { color: var(--accent-strong); }
   .dpp-controls { padding-top: 1rem; border-top: 1px solid var(--border); }
   .curve-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; margin-bottom: 1rem; }
   label { display: grid; gap: 0.25rem; color: var(--text-muted); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }

@@ -106,3 +106,47 @@ gh api --method POST repos/jonathanlys01/reve-atlas/pages -f build_type=workflow
 ```
 
 The deployed application is available at <https://jonathanlys01.github.io/reve-atlas/>.
+
+## Import a full-corpus clustered DPP selection
+
+Clustered DPP is a separate strategy from the per-recording sweeps. Its manifest
+covers the full embedding corpus; the browser overlays only its intersection with
+the existing display population. Full and displayed counts are shown separately,
+and the complete sorted window manifest is downloadable.
+
+Use `atlas.parquet` and `display.parquet` from the same pinned Hugging Face revision.
+The selector must have finished successfully, with a `.txt` manifest and its
+sibling `.json` report. Run the bounded-memory importer on scratch storage:
+
+```bash
+uv run python scripts/import_clustered_selection.py \
+  --manifest /path/to/clustered_dpp_n1000_k100_seed29.txt \
+  --atlas /path/to/atlas.parquet --display /path/to/display.parquet \
+  --output-dir /path/to/new-clustered-overlay --work-dir /path/to/scratch \
+  --atlas-revision SOURCE_HF_COMMIT
+```
+
+The importer checks the checksum, exact retention quota, sorted unique IDs, full
+atlas population, and membership of every selected/display ID in the full atlas.
+It refuses to overwrite an existing output directory. Its three outputs contain
+only IDs and allowlisted provenance, never private embedding vectors or paths:
+
+- `clustered_manifest.txt`: all selected IDs.
+- `clustered_selections.parquet`: selected IDs present in the display file.
+- `clustered_run.json`: full/display counts, configuration and hashes.
+
+With write access to the dataset, publish those three files together in one Hugging
+Face commit under `data/`. Preserve the existing atlas, display and sweep files.
+The default frontend automatically loads `data/clustered_run.json`. For another
+host, set `VITE_ATLAS_CLUSTERED_RUN_URL` to that metadata URL; the two companion
+files must be in the same directory. Use an absolute URL. A missing or invalid
+overlay leaves the existing atlas usable; invalid metadata or memberships are
+reported beside the selection controls. Custom atlas URLs disable the default
+overlay unless explicitly configured.
+
+Additional checks:
+
+```bash
+node --test tests/clustered_run.test.mjs
+uv run pytest tests/test_import_clustered_selection.py
+```
