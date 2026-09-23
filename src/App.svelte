@@ -11,9 +11,10 @@
   // Optional columns written by the hierarchical-group artifact sets; the default table lacks them.
   const GROUP_CHART_COLUMNS = ["group_split", "group_depth", "group_size"];
   // Map-coloring palette for the precomputed ``group_colour`` column (adjacent groups differ).
+  // Ten colours: embedding-atlas colours at most ten categories and folds the rest into "(other)".
   const GROUP_COLORS = [
-    "#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#eeca3b",
-    "#b279a2", "#ff9da6", "#9d755d", "#79706e", "#1f77b4", "#8c564b",
+    "#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2",
+    "#eeca3b", "#b279a2", "#ff9da6", "#9d755d", "#79706e",
   ];
   type Run = {
     run_id: string;
@@ -66,9 +67,11 @@
     "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/selection_runs_web.parquet";
   const DEFAULT_CURVES_URL =
     "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/curve_summary.parquet";
-  // Embedding-space group sets (hierarchical DPP experiment), selected with ?set=<name>. Each is a
-  // complete artifact set (display + group columns, selections, runs, curves) under
-  // <clusters base>/<name>/; without ?set the published per-recording tables load as before.
+  // Embedding-space group sets (hierarchical DPP experiment), selected with ?set=<name> or the
+  // "Candidate groups" picker. A set is a small overlay on the published display population:
+  // <clusters base>/<name>/overlay.parquet (group columns + one uint32 DPP-membership bitmask per
+  // direction/eta/kernel), sweep.json (the w value behind each bit) and curve_summary.parquet.
+  // Sets switch in place; the published per-recording tables load only when that view is shown.
   const GROUP_SETS = [
     { name: "dbscan_hier_proportional", label: "DBSCAN groups (k-means fallback) · proportional" },
     { name: "dbscan_hier_flat", label: "DBSCAN groups (k-means fallback) · flat" },
@@ -76,30 +79,27 @@
     { name: "kmeans_control_flat", label: "k-means control groups · flat" },
   ] as const;
   const DEFAULT_CLUSTERS_BASE_URL = "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/clusters";
+  const clustersBaseUrl = (import.meta.env.VITE_ATLAS_CLUSTERS_BASE_URL ?? DEFAULT_CLUSTERS_BASE_URL).replace(/\/$/, "");
   const requestedSet = new URLSearchParams(window.location.search).get("set");
-  const groupSet = GROUP_SETS.find((item) => item.name === requestedSet) ?? null;
-  const groupSetBase = groupSet
-    ? `${(import.meta.env.VITE_ATLAS_CLUSTERS_BASE_URL ?? DEFAULT_CLUSTERS_BASE_URL).replace(/\/$/, "")}/${groupSet.name}`
-    : "";
-  const atlasUrl = groupSet ? `${groupSetBase}/display.parquet`
-    : import.meta.env.VITE_ATLAS_ATLAS_URL ?? import.meta.env.VITE_ATLAS_DATA_URL ?? DEFAULT_ATLAS_URL;
-  const selectionsUrl = groupSet ? `${groupSetBase}/selections.parquet`
-    : import.meta.env.VITE_ATLAS_SELECTIONS_URL ?? DEFAULT_SELECTIONS_URL;
-  const runsUrl = groupSet ? `${groupSetBase}/selection_runs_web.parquet`
-    : import.meta.env.VITE_ATLAS_RUNS_URL ?? DEFAULT_RUNS_URL;
-  const curvesUrl = groupSet ? `${groupSetBase}/curve_summary.parquet`
-    : import.meta.env.VITE_ATLAS_CURVES_URL ?? DEFAULT_CURVES_URL;
-  // Group sets share the published display population, so the clustered overlay still applies.
+  const initialSet = GROUP_SETS.find((item) => item.name === requestedSet)?.name ?? null;
+  type SetSweep = {
+    set: string;
+    rows: number;
+    groups: number;
+    w_grid: Record<string, number[]>;
+    etas: number[];
+    directions: string[];
+    mask_columns: string[];
+  };
+  const atlasUrl =
+    import.meta.env.VITE_ATLAS_ATLAS_URL ?? import.meta.env.VITE_ATLAS_DATA_URL ?? DEFAULT_ATLAS_URL;
+  const selectionsUrl = import.meta.env.VITE_ATLAS_SELECTIONS_URL ?? DEFAULT_SELECTIONS_URL;
+  const runsUrl = import.meta.env.VITE_ATLAS_RUNS_URL ?? DEFAULT_RUNS_URL;
+  const curvesUrl = import.meta.env.VITE_ATLAS_CURVES_URL ?? DEFAULT_CURVES_URL;
   const clusteredRunUrl = import.meta.env.VITE_ATLAS_CLUSTERED_RUN_URL ??
-    (atlasUrl === DEFAULT_ATLAS_URL || groupSet
+    (atlasUrl === DEFAULT_ATLAS_URL
       ? "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/clustered_run.json"
       : "");
-  function switchGroupSet(name: string): void {
-    const url = new URL(window.location.href);
-    if (name) url.searchParams.set("set", name);
-    else url.searchParams.delete("set");
-    window.location.assign(url.toString());
-  }
   const clusteredManifestUrl = clusteredRunUrl ? new URL("clustered_manifest.txt?download=true", clusteredRunUrl).toString() : "";
   const datasetTokenUrl = new URL(`${import.meta.env.BASE_URL}dataset_token.json`, window.location.href).toString();
   const REQUIRED_COLUMNS = [
@@ -186,6 +186,13 @@
   let colourBy: "dataset" | "group" = "dataset";
   let groupFilterId: number | null = null;
   const groupFilterSource = { reset: () => groupFilterId = null };
+  let currentSet: string | null = initialSet;
+  let setSweep: SetSweep | null = null;
+  let setLoading = false;
+  let setError = "";
+  let labelSelectSql = "";
+  let publishedView: { runs: Run[]; curves: CurveSummaryRow[] } | null = null;
+  const loadedOverlays = new Set<string>();
 
   async function applyGroupFilter(): Promise<void> {
     let group = [...coordinator.filterGroups.values()].sort((a, b) => b.clients.size - a.clients.size)[0];
@@ -233,6 +240,12 @@
   )].sort((a, b) => a - b);
   $: atlasWValue = atlasWValues[Math.min(atlasWIndex, Math.max(0, atlasWValues.length - 1))] ?? null;
 
+  function dppPredicate(column: string, w: number) {
+    if (!setSweep) return SQL.listContains(column, w);
+    const bit = (setSweep.w_grid[atlasDppKernel] ?? []).indexOf(w);
+    return bit < 0 ? null : SQL.sql`((${SQL.column(column)} >> ${bit}) & 1) = 1`;
+  }
+
   async function applyAtlasDppFilter(resetWeight = false): Promise<void> {
     if (resetWeight) atlasWIndex = 0;
     let group = [...coordinator.filterGroups.values()].sort((a, b) => b.clients.size - a.clients.size)[0];
@@ -253,7 +266,7 @@
         : null,
       predicate: atlasDppMode !== "selected" ? null
         : clustered && clusteredRun ? SQL.eq(SQL.column("clustered_selected"), true)
-        : !clustered && filter && value !== null ? SQL.listContains(dppColumn(atlasDppDirection, filter), value)
+        : !clustered && filter && value !== null ? dppPredicate(dppColumn(atlasDppDirection, filter), value)
         : null,
     });
   }
@@ -325,7 +338,7 @@
       current: row.w_interaction === currentWeight,
       w: row.w_interaction,
       kernel: (row.kernel_method === "multiplicative" || row.kernel_method === "additive") ? row.kernel_method : null,
-      tooltip: `${row.kernel_method ? `[${row.kernel_method}] ` : ""}w=${row.w_interaction} · ${xLabel} ${xOf(row).toPrecision(4)} · loss ${row.mean_recon_loss_mean.toPrecision(4)} (mean of ${row.recording_count} recordings)`,
+      tooltip: `${row.kernel_method ? `[${row.kernel_method}] ` : ""}w=${row.w_interaction} · ${xLabel} ${xOf(row).toPrecision(4)} · loss ${row.mean_recon_loss_mean.toPrecision(4)} (mean of ${row.recording_count} ${setSweep ? "groups" : "recordings"})`,
     }));
   }
   function buildBaselinePoint(
@@ -515,28 +528,38 @@
     }
   }
 
+  async function fetchIntoDuckDB(url: string, file: string): Promise<void> {
+    // Hugging Face serves LFS/Xet files through a redirect whose Content-Length DuckDB-WASM can
+    // mistake for the Parquet size; the browser follows it correctly, so register a local buffer.
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Could not load ${url}: HTTP ${response.status}`);
+    const duckdb = await dbConnector!.getDuckDB();
+    await duckdb.registerFileBuffer(file, new Uint8Array(await response.arrayBuffer()));
+  }
+
+  async function releaseFile(file: string): Promise<void> {
+    // Registered buffers live in DuckDB-WASM memory (capped near 3 GiB) until dropped.
+    try { await (await dbConnector!.getDuckDB()).dropFile(file); } catch { /* already gone */ }
+  }
+
+  function tableSafe(name: string): string {
+    return name.replace(/[^a-z0-9_]/gi, "_");
+  }
+
   async function initialize(): Promise<void> {
     const wasm = await wasmConnector();
     dbConnector = wasm;
     coordinator.databaseConnector(wasm);
     await coordinator.exec(`CREATE OR REPLACE VIEW atlas_source AS SELECT * FROM read_parquet(${SQL.literal(atlasUrl)})`);
-    const sourceColumns = (await coordinator.query("DESCRIBE atlas_source", { type: "json" })) as { column_name: string }[];
-    const sourceColumnNames = new Set(sourceColumns.map((row) => row.column_name));
-    hasGroups = sourceColumnNames.has("group_id") && sourceColumnNames.has("group_colour");
-    groupChartColumns = GROUP_CHART_COLUMNS.filter((column) => sourceColumnNames.has(column));
-    if (hasGroups) {
-      const [row] = (await coordinator.query("SELECT max(group_id) + 1 AS n FROM atlas_source", { type: "json" })) as { n: number }[];
-      groupCount = Number(row.n);
-    }
     // Small per-dataset lookup (task modality, domain, any further label), joined onto "dataset" —
     // not worth duplicating into the main parquet since it only varies per dataset, not per point.
     await loadDatasetClasses();
-    const labelSelect = labelColumns.map((column) => `dataset_classes.${quoteIdent(column)}, `).join("");
+    labelSelectSql = labelColumns.map((column) => `dataset_classes.${quoteIdent(column)}, `).join("");
     realMode = Boolean(selectionsUrl && runsUrl);
     if (!realMode) {
       await coordinator.exec(`
         CREATE OR REPLACE TABLE display_points AS
-        SELECT atlas_source.*, ${labelSelect}${pointLabelSql(hasGroups)}, ${CHANNEL_GROUP_SQL}
+        SELECT atlas_source.*, ${labelSelectSql}${pointLabelSql(false)}, ${CHANNEL_GROUP_SQL}
         FROM atlas_source
         LEFT JOIN dataset_classes USING (dataset)
         WHERE hash(row_id) % 100 < 8
@@ -545,18 +568,16 @@
       await coordinator.exec(`SELECT ${REQUIRED_COLUMNS} FROM display_points LIMIT 0`);
       return;
     }
+    await loadClusteredOverlay(wasm);
+    if (currentSet) await loadGroupSet(currentSet);
+    else await loadPublished();
+  }
+
+  async function loadPublished(): Promise<void> {
+    const labelSelect = labelSelectSql;
     await coordinator.exec(`CREATE OR REPLACE TABLE selection_memberships AS SELECT * FROM read_parquet(${SQL.literal(selectionsUrl)})`);
-    // Hugging Face serves LFS/Xet files through a redirect whose Content-Length
-    // DuckDB-WASM can mistake for the Parquet size. The browser follows that
-    // redirect correctly, so register the small web-specific table as a local
-    // DuckDB file instead of asking DuckDB to open the remote URL itself.
-    const runsResponse = await fetch(runsUrl, { cache: "no-store" });
-    if (!runsResponse.ok) {
-      throw new Error(`Could not load ${runsUrl}: HTTP ${runsResponse.status}`);
-    }
     const runsFile = "selection_runs_web.parquet";
-    const duckdb = await wasm.getDuckDB();
-    await duckdb.registerFileBuffer(runsFile, new Uint8Array(await runsResponse.arrayBuffer()));
+    await fetchIntoDuckDB(runsUrl, runsFile);
     await coordinator.exec(`
       CREATE OR REPLACE TABLE selection_runs AS
       SELECT
@@ -567,8 +588,7 @@
       FROM read_parquet(${SQL.literal(runsFile)})
     `);
     await coordinator.exec(`CREATE OR REPLACE TABLE curve_summary_table AS SELECT * FROM read_parquet(${SQL.literal(curvesUrl)})`);
-    curveSummary = (await coordinator.query("SELECT * FROM curve_summary_table", { type: "json" })) as CurveSummaryRow[];
-    await loadClusteredOverlay(wasm);
+    const curves = (await coordinator.query("SELECT * FROM curve_summary_table", { type: "json" })) as CurveSummaryRow[];
     await coordinator.exec(`
       CREATE OR REPLACE TABLE display_points AS
       WITH required_points AS (
@@ -582,7 +602,7 @@
           AND NOT EXISTS (SELECT 1 FROM required_points WHERE required_points.row_id = atlas_source.row_id)
         LIMIT ${DISPLAY_SAMPLE_CAP}
       )
-      SELECT combined.*, ${labelSelect}${pointLabelSql(hasGroups)}, ${CHANNEL_GROUP_SQL} FROM (
+      SELECT combined.*, ${labelSelect}${pointLabelSql(false)}, ${CHANNEL_GROUP_SQL} FROM (
         SELECT * FROM required_points
         UNION ALL
         SELECT * FROM sampled_points
@@ -625,7 +645,152 @@
       LEFT JOIN dpp_memberships USING (row_id)
       LEFT JOIN clustered_memberships USING (row_id)
     `);
+    // Only display_points_with_dpp is read from here on; free the ~16M-row intermediates.
+    for (const table of ["dpp_memberships", "selection_memberships", "display_points", "selection_runs", "curve_summary_table"]) {
+      await coordinator.exec(`DROP TABLE IF EXISTS ${table}`);
+    }
+    await releaseFile(runsFile);
+    publishedView = { runs, curves };
+    showPublished();
+  }
+
+  function showPublished(): void {
+    if (!publishedView) return;
+    setSweep = null;
+    hasGroups = false;
+    groupCount = 0;
+    groupChartColumns = [];
+    colourBy = "dataset";
+    groupFilterId = null;
+    runs = publishedView.runs;
+    curveSummary = publishedView.curves;
     activeTableName = "display_points_with_dpp";
+  }
+
+  async function loadGroupSet(name: string): Promise<void> {
+    const base = `${clustersBaseUrl}/${name}`;
+    const safe = tableSafe(name);
+    const sweepResponse = await fetch(`${base}/sweep.json`, { cache: "no-store" });
+    if (!sweepResponse.ok) throw new Error(`Could not load ${base}/sweep.json: HTTP ${sweepResponse.status}`);
+    const sweep = (await sweepResponse.json()) as SetSweep;
+    if (!loadedOverlays.has(name)) {
+      await fetchIntoDuckDB(`${base}/overlay.parquet`, `overlay_${safe}.parquet`);
+      await fetchIntoDuckDB(`${base}/curve_summary.parquet`, `curves_${safe}.parquet`);
+      await coordinator.exec(`CREATE OR REPLACE TABLE overlay_${safe} AS SELECT * FROM read_parquet('overlay_${safe}.parquet')`);
+      await coordinator.exec(`CREATE OR REPLACE TABLE curves_${safe} AS SELECT * FROM read_parquet('curves_${safe}.parquet')`);
+      await releaseFile(`overlay_${safe}.parquet`);
+      await releaseFile(`curves_${safe}.parquet`);
+      loadedOverlays.add(name);
+    }
+    const [check] = (await coordinator.query(
+      `SELECT count(*)::INTEGER AS overlay_rows,
+        (SELECT count(*)::INTEGER FROM atlas_source) AS atlas_rows,
+        count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM atlas_source a WHERE a.row_id = o.row_id))::INTEGER AS missing
+       FROM overlay_${safe} o`,
+      { type: "json" },
+    )) as { overlay_rows: number; atlas_rows: number; missing: number }[];
+    if (check.overlay_rows !== sweep.rows || check.atlas_rows !== sweep.rows || check.missing !== 0) {
+      throw new Error(`Group set ${name} does not match the loaded display population`);
+    }
+    const masks = sweep.mask_columns.map(quoteIdent);
+    const anyMask = masks.length ? `(${masks.join(" | ")}) <> 0` : "false";
+    const table = `set_points_${safe}`;
+    await coordinator.exec(`
+      CREATE OR REPLACE TABLE ${table} AS
+      WITH source AS (
+        SELECT atlas_source.*, overlay.* EXCLUDE (row_id)
+        FROM atlas_source INNER JOIN overlay_${safe} AS overlay USING (row_id)
+      ), required_points AS (
+        SELECT * FROM source
+        WHERE ${anyMask} OR row_id IN (SELECT row_id FROM clustered_memberships)
+      ), sampled_points AS (
+        SELECT * FROM source
+        WHERE hash(row_id) % 100 < 8
+          AND NOT (${anyMask} OR row_id IN (SELECT row_id FROM clustered_memberships))
+        LIMIT ${DISPLAY_SAMPLE_CAP}
+      )
+      SELECT combined.*, ${labelSelectSql}${pointLabelSql(true)}, ${CHANNEL_GROUP_SQL},
+        (clustered_memberships.row_id IS NOT NULL) AS clustered_selected
+      FROM (SELECT * FROM required_points UNION ALL SELECT * FROM sampled_points) AS combined
+      LEFT JOIN dataset_classes USING (dataset)
+      LEFT JOIN clustered_memberships USING (row_id)
+    `);
+    await coordinator.exec(`SELECT ${REQUIRED_COLUMNS} FROM ${table} LIMIT 0`);
+    // The w slider and eta/scope options read the runs list; derive it from the sweep grid.
+    const syntheticRuns: Run[] = [];
+    for (const direction of sweep.directions) {
+      for (const eta of sweep.etas) {
+        for (const [kernel, grid] of Object.entries(sweep.w_grid)) {
+          for (const w of grid) {
+            syntheticRuns.push({
+              run_id: `${name}:${direction}:${eta}:${kernel}:${w}`, method: "dpp", scope: "per_group",
+              direction: direction as Run["direction"], selection_eta: eta,
+              kernel_method: kernel as Run["kernel_method"], w_interaction: w,
+            } as Run);
+          }
+        }
+      }
+    }
+    const curves = (await coordinator.query(`SELECT * FROM curves_${safe}`, { type: "json" })) as CurveSummaryRow[];
+    setSweep = sweep;
+    hasGroups = true;
+    groupCount = sweep.groups;
+    groupChartColumns = GROUP_CHART_COLUMNS;
+    groupFilterId = null;
+    runs = syntheticRuns;
+    curveSummary = curves;
+    const previousSet = currentSet;
+    activeTableName = table;
+    if (previousSet && previousSet !== name) {
+      // Keep only the shown set resident: free the previous one once the atlas has moved on.
+      const old = tableSafe(previousSet);
+      loadedOverlays.delete(previousSet);
+      setTimeout(() => {
+        for (const stale of [`set_points_${old}`, `overlay_${old}`, `curves_${old}`]) {
+          coordinator.exec(`DROP TABLE IF EXISTS ${stale}`).catch(() => undefined);
+        }
+      }, 2000);
+    }
+  }
+
+  async function switchGroupSet(name: string): Promise<void> {
+    const target = name || null;
+    if (target === currentSet || setLoading) return;
+    setLoading = true;
+    setError = "";
+    try {
+      if (target) await loadGroupSet(target);
+      else if (publishedView) {
+        showPublished();
+        if (currentSet) {
+          const old = tableSafe(currentSet);
+          loadedOverlays.delete(currentSet);
+          setTimeout(() => {
+            for (const stale of [`set_points_${old}`, `overlay_${old}`, `curves_${old}`]) {
+              coordinator.exec(`DROP TABLE IF EXISTS ${stale}`).catch(() => undefined);
+            }
+          }, 2000);
+        }
+      }
+      else {
+        // The published tables were never loaded in this tab: a fresh page load is lighter than
+        // stacking ~16M memberships on top of the group-set tables in the same DuckDB-WASM heap.
+        const url = new URL(window.location.href);
+        url.searchParams.delete("set");
+        window.location.assign(url.toString());
+        return;
+      }
+      currentSet = target;
+      const url = new URL(window.location.href);
+      if (target) url.searchParams.set("set", target);
+      else url.searchParams.delete("set");
+      window.history.replaceState(null, "", url.toString());
+      await setColourBy();
+    } catch (error) {
+      setError = error instanceof Error ? error.message : String(error);
+    } finally {
+      setLoading = false;
+    }
   }
 
   async function exportSelection(
@@ -683,11 +848,13 @@
           {#if railTab === "explore"}
             <p class="display-note">Display: a fixed sample of about 2M points. Full-corpus totals are reported separately.</p>
             <label class="set-picker">Candidate groups
-              <select value={groupSet?.name ?? ""} onchange={(event) => switchGroupSet(event.currentTarget.value)}>
+              <select value={currentSet ?? ""} disabled={setLoading} onchange={(event) => switchGroupSet(event.currentTarget.value)}>
                 <option value="">Per recording (published)</option>
                 {#each GROUP_SETS as item}<option value={item.name}>{item.label}</option>{/each}
               </select>
             </label>
+            {#if setLoading}<p class="view-note">Loading candidate groups…</p>{/if}
+            {#if setError}<p class="view-note">Could not switch candidate groups: {setError}</p>{/if}
             {#if hasGroups}
               <div class="control-stack group-controls">
                 <h3>Groups ({groupCount})</h3>
@@ -792,7 +959,7 @@
             <div class="control-stack dpp-controls">
               <label>Selection strategy
                 <select bind:value={atlasSelectionStrategy} onchange={() => applyAtlasDppFilter()}>
-                  <option value="recording">Per-recording DPP sweep</option>
+                  <option value="recording">{setSweep ? "Per-group" : "Per-recording"} DPP sweep</option>
                   {#if clusteredRun}<option value="clustered">Full-corpus clustered DPP</option>{/if}
                 </select>
               </label>

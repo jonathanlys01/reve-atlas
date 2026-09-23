@@ -184,21 +184,31 @@ uv run pytest tests/test_import_clustered_selection.py
 
 ## Embedding-space group sets
 
-Besides the published per-recording sweep, the atlas can load DPP sweeps whose candidate
+Besides the published per-recording sweep, the atlas can show DPP sweeps whose candidate
 pools are groups in the 512-d embedding space (the hierarchical-DPP experiment; see
 `_scratchpad/hierarchical_dpp_clusters_report.md` in `reve-2`). Pick one under
 **Candidate groups** in the Explore rail, or open the page with `?set=<name>`:
 `dbscan_hier_proportional`, `dbscan_hier_flat`, `kmeans_control_proportional`,
-`kmeans_control_flat`. Each set lives under `data/clusters/<name>/` on Hugging Face
-(`display.parquet` with group columns, `selections.parquet`, `selection_runs_web.parquet`,
-`curve_summary.parquet`, plus `groups.parquet`, `index_metrics.parquet` and JSON provenance).
-Override the base with `VITE_ATLAS_CLUSTERS_BASE_URL`. Without `?set`, nothing changes.
+`kmeans_control_flat`. Without `?set`, nothing changes.
 
-When a set is loaded, a **Groups** block colours points by a map-colouring of the groups
-(`group_colour`, adjacent groups differ) and isolates a single group. The groups are compact
-in 512-d but scattered on the 2-D projection, so isolating one group is the informative view.
+A set is a small overlay on the published `data/display.parquet` (the same 1.9M points), under
+`data/clusters/<name>/` on Hugging Face (override the base with `VITE_ATLAS_CLUSTERS_BASE_URL`):
+
+- `overlay.parquet` (~15 MB): per display point, the group columns and one uint32 bitmask per
+  (direction, eta, kernel); bit *i* is set when the point is in the DPP run at the *i*-th w.
+- `sweep.json`: the w grid behind the bits, plus row and membership counts.
+- `curve_summary.parquet`: the aggregated operating curves.
+
+Sets switch in place (~15 MB each); only the shown set stays in DuckDB-WASM memory. The larger
+per-set files next to them (`display`, `selections`, `selection_runs_web`, `groups`,
+`index_metrics`) are the offline experiment outputs and are not read by the browser.
+
+When a set is loaded, a **Groups** block colours points by a 10-colour map-colouring of the groups
+(`group_colour`; adjacent groups differ, and embedding-atlas colours at most ten categories) and
+isolates a single group. The groups are compact in 512-d but scattered on the 2-D projection, so
+isolating one group is the informative view.
 
 The sets are produced offline by `scripts/hier_groups.py` (grouping), `scripts/hier_set_config.py`
 + `scripts/run_display_sweep.py` (sweep), `scripts/hier_finalize_set.py`,
-`scripts/hier_group_colors.py` and `scripts/hier_index_metrics.py`. Do not run `npm run build`
+`scripts/hier_group_colors.py`, `scripts/hier_index_metrics.py` and `scripts/hier_set_overlay.py` (the browser overlay). Do not run `npm run build`
 while `public/data/` holds local copies of these files: Vite copies `public/` into `dist/`.

@@ -49,7 +49,7 @@ def dsatur(adjacency: list[set[int]], weights: dict[tuple[int, int], int], palet
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--set-dir", type=Path, required=True)
-    parser.add_argument("--palette", type=int, default=12)
+    parser.add_argument("--palette", type=int, default=10, help="embedding-atlas colours at most 10 categories")
     parser.add_argument("--neighbours", type=int, default=8)
     parser.add_argument("--min-contacts", type=int, default=20, help="neighbour pairs needed to call two groups adjacent")
     args = parser.parse_args()
