@@ -22,12 +22,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     files = {
-        "display.parquet": "data/display.parquet",
-        "atlas.parquet": "data/atlas.parquet",
-        "selections.parquet": "data/selections.parquet",
-        "selection_runs.parquet": "data/selection_runs.parquet",
-        "curve_summary.parquet": "data/curve_summary.parquet",
-        "manifest.json": "data/manifest.json",
+        "display.parquet": ["data/display.parquet"],
+        "atlas.parquet": ["data/atlas.parquet"],
+        "selections.parquet": ["data/selections.parquet"],
+        # The frontend fetches this table itself (not via DuckDB's direct URL read) to work
+        # around an HF LFS/Xet redirect Content-Length bug, and only knows the "_web" name.
+        "selection_runs.parquet": ["data/selection_runs.parquet", "data/selection_runs_web.parquet"],
+        "curve_summary.parquet": ["data/curve_summary.parquet"],
+        "manifest.json": ["data/manifest.json"],
     }
     for filename in files:
         path = args.data_dir / filename
@@ -44,14 +46,15 @@ def main() -> None:
             raise PermissionError("The configured Hugging Face token cannot write this dataset.") from error
         raise
 
-    for filename, remote_path in files.items():
-        api.upload_file(
-            path_or_fileobj=args.data_dir / filename,
-            path_in_repo=remote_path,
-            repo_id=args.repo_id,
-            repo_type="dataset",
-            commit_message=f"Add real REVE Atlas {filename}",
-        )
+    for filename, remote_paths in files.items():
+        for remote_path in remote_paths:
+            api.upload_file(
+                path_or_fileobj=args.data_dir / filename,
+                path_in_repo=remote_path,
+                repo_id=args.repo_id,
+                repo_type="dataset",
+                commit_message=f"Add real REVE Atlas {remote_path}",
+            )
     api.upload_file(
         path_or_fileobj=args.card,
         path_in_repo="README.md",

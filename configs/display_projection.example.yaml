@@ -1,5 +1,19 @@
 # Projection-only config for the public display population. The private
 # display embedding cache is the complete population for this demo.
+#
+# Full-fidelity cuML GPU UMAP: fit_sample_size is set above any realistic
+# population size, so project_embeddings clips it to len(embeddings) and fits
+# every row directly (exact brute-force kNN graph, since a fixed random_state
+# forces cuML off the approximate nn_descent path) instead of sampling a fit
+# subset and extending the rest by cosine-kNN interpolation.
+#
+# init: spectral, not pca. Empirically (on the real 1.9M-row display population,
+# where TUH+ICARE alone are ~75% of rows) PCA init collapsed almost everything
+# into one small round blob, since PCA's top-2 global variance directions are
+# dominated by those two datasets and bury the rest. Spectral (cuML's default)
+# produces the same kind of multi-branch structure as the old sampled fit, and
+# scores higher on both a cosine-neighbor recall@30 check and a per-dataset
+# 2D cluster-separation check against it.
 projection:
   method: umap
   device: cuda
@@ -7,13 +21,6 @@ projection:
   n_neighbors: 30
   min_dist: 0.1
   metric: cosine
-  n_epochs: 200
-  low_memory: true
-  n_jobs: 32
-  # Parallel UMAP fit is intentionally nondeterministic; seed is still recorded.
-  parallel: true
-  fit_sample_size: 100000
-  transform_chunk_size: 4096
-  out_of_sample: nearest_neighbor
-  interpolation_neighbors: 16
-  interpolation_temperature: 12
+  n_epochs: 1500
+  init: spectral
+  fit_sample_size: 10000000

@@ -49,12 +49,94 @@ def _dpp_worker_init() -> None:
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 
+DEFAULT_GROUPING = "big_recording_index"
+# Greedy steps whose normalized pivot^2 (pivot^2 / K_ii of the pick) exceeds this are counted as
+# data rank; two decades above the default epsilon, so jitter is not counted. Normalizing by the
+# diagonal removes the multiplicative weights (for K = W S W the ratio is the unweighted residual
+# of the pick against the span of the earlier picks) and equals the raw pivot^2 at w=0.
+OPERATIONAL_PIVOT_THRESHOLD = 1.0e-4
+# Steps whose normalized pivot^2 sits within this factor of epsilon are pure jitter.
+DEGENERATE_PIVOT_FACTOR = 10.0
+
+
+def _normalized_pivots(
+    gains: list[float], positions: list[int], similarity: np.ndarray, utility: np.ndarray, method: str, interaction: float, epsilon: float
+) -> np.ndarray:
+    positions_array = np.asarray(positions, dtype=np.int64)
+    self_similarity = similarity[positions_array, positions_array]
+    if method == "multiplicative":
+        weights = np.exp(interaction * (utility[positions_array] - float(np.max(utility))))
+        diagonal = weights**2 * self_similarity
+    else:
+        diagonal = utility[positions_array] + epsilon + interaction * self_similarity
+    return np.exp(np.asarray(gains, dtype=np.float64)) / diagonal
+
+
+def _group_key(grouping: str, group: int | None) -> dict[str, Any]:
+    """Run-id configuration key; unchanged for the default recording grouping."""
+    if grouping == DEFAULT_GROUPING:
+        return {"recording": group}
+    return {"grouping": grouping, "group": group}
+
+
+def _group_columns(grouping: str, group: int | None) -> dict[str, Any]:
+    return {
+        "grouping": grouping,
+        "group_id": group,
+        "big_recording_index": group if grouping == DEFAULT_GROUPING else None,
+    }
+
+
+def allocate(group_sizes: dict[int, int], selection_eta: float, allocation: str) -> dict[int, int]:
+    """Per-group selection sizes.
+
+    ``proportional`` gives ``max(1, ceil(eta * n_g))`` (the published behavior). ``flat``
+    water-fills ``min(n_g, t)`` so the total is ``round(eta * N)``; the integer remainder goes
+    to the lowest group ids that are not saturated.
+    """
+    if allocation == "proportional":
+        return {group: max(1, min(size, int(np.ceil(selection_eta * size)))) for group, size in group_sizes.items()}
+    if allocation != "flat":
+        raise AtlasDataError(f"Unknown allocation: {allocation}")
+    groups = sorted(group_sizes)
+    sizes = np.asarray([group_sizes[group] for group in groups], dtype=np.int64)
+    target = int(round(selection_eta * int(sizes.sum())))
+    if not len(groups) <= target <= int(sizes.sum()):
+        raise AtlasDataError(f"Flat allocation target {target} is incompatible with {len(groups)} groups")
+    low, high = 1, int(sizes.max())
+    while low < high:  # largest t with sum(min(n, t)) <= target
+        middle = (low + high + 1) // 2
+        if int(np.minimum(sizes, middle).sum()) <= target:
+            low = middle
+        else:
+            high = middle - 1
+    counts = np.minimum(sizes, low)
+    remainder = target - int(counts.sum())
+    open_positions = np.flatnonzero(sizes > low)[:remainder]
+    counts[open_positions] += 1
+    return {group: int(count) for group, count in zip(groups, counts.tolist(), strict=True)}
+
+
+def _load_grouping(config: dict[str, Any], window_ids: list[str], recording_ids: np.ndarray) -> tuple[str, np.ndarray]:
+    grouping = dict(config.get("grouping") or {})
+    name = str(grouping.get("name", DEFAULT_GROUPING))
+    if name == DEFAULT_GROUPING and "source" not in grouping:
+        return name, recording_ids
+    column = str(grouping.get("column", "group_id"))
+    table = pq.read_table(Path(str(grouping["source"])).expanduser(), columns=["row_id", column])
+    by_row = dict(zip(table["row_id"].to_pylist(), table[column].to_pylist(), strict=True))
+    if len(by_row) != len(window_ids) or any(window_id not in by_row for window_id in window_ids):
+        raise AtlasDataError(f"Grouping {name} does not cover the selection source exactly")
+    return name, np.asarray([int(by_row[window_id]) for window_id in window_ids], dtype=np.int64)
+
+
 def _process_dpp_recording(task: dict[str, Any]) -> dict[str, Any]:
     """Run every kernel/w sweep point for one recording. Independent across recordings."""
     embeddings = _WORKER_DATA["embeddings"]
     losses = _WORKER_DATA["losses"]
     window_ids = _WORKER_DATA["window_ids"]
-    recording_ids = _WORKER_DATA["recording_ids"]
+    group_ids = _WORKER_DATA["group_ids"]
+    window_order = _WORKER_DATA["window_order"]
     source_indices_by_run = _WORKER_DATA["source_indices_by_run"]
 
     recording = task["recording"]
@@ -72,14 +154,14 @@ def _process_dpp_recording(task: dict[str, Any]) -> dict[str, Any]:
     configuration_fingerprint = task["configuration_fingerprint"]
 
     candidate_indices = (
-        np.flatnonzero(recording_ids == recording).tolist()
+        np.flatnonzero(group_ids == recording).tolist()
         if full_population
         else source_indices_by_run[candidate_run_id]
     )
     if not full_population and scope == "global":
-        candidate_indices = [index for index in candidate_indices if int(recording_ids[index]) == recording]
+        candidate_indices = [index for index in candidate_indices if int(group_ids[index]) == recording]
     candidate_k = len(candidate_indices)
-    selection_k = max(1, min(candidate_k, int(np.ceil(selection_eta * candidate_k))))
+    selection_k = task.get("selection_k") or max(1, min(candidate_k, int(np.ceil(selection_eta * candidate_k))))
     if candidate_k < selection_k:
         raise AtlasDataError(
             f"DPP {candidate_config_id} recording {recording} has {candidate_k} candidates, "
@@ -90,10 +172,13 @@ def _process_dpp_recording(task: dict[str, Any]) -> dict[str, Any]:
     candidate_losses = losses[candidate_indices_array]
     utility, utility_min, utility_max = normalize_utility(candidate_losses, direction)
     similarity = cosine_gram(embeddings[candidate_indices_array], epsilon=epsilon)
+    tie_tolerance = task.get("tie_tolerance")
+    tie_order = None if tie_tolerance is None else window_order[candidate_indices_array]
     baseline_indices = source_indices_by_run[candidate_run_id]
     baseline_set = {window_ids[int(index)] for index in baseline_indices}
     gpu_similarity = None
-    use_gpu = torch_dpp_available()
+    backend = task.get("dpp_backend", "auto")
+    use_gpu = backend == "torch" or (backend == "auto" and torch_dpp_available())
     if use_gpu:
         import torch
 
@@ -106,13 +191,15 @@ def _process_dpp_recording(task: dict[str, Any]) -> dict[str, Any]:
         for interaction in [float(value) for value in kernel_values["w_interaction"]]:
             if gpu_similarity is not None:
                 selected_positions, gains, logdet = torch_greedy_map(
-                    gpu_similarity, utility, str(kernel_method), interaction, selection_k, epsilon
+                    gpu_similarity, utility, str(kernel_method), interaction, selection_k, epsilon,
+                    tie_order=tie_order, tie_tolerance=tie_tolerance,
                 )
                 solver_backend = "torch-gpu-greedy-cholesky"
                 device = "cuda"
             else:
                 selected_positions, gains, logdet = greedy_map_lazy(
-                    similarity, utility, str(kernel_method), interaction, selection_k, epsilon
+                    similarity, utility, str(kernel_method), interaction, selection_k, epsilon,
+                    tie_order=tie_order, tie_tolerance=tie_tolerance,
                 )
                 solver_backend = "numpy-greedy-cholesky"
                 device = "cpu"
@@ -125,7 +212,7 @@ def _process_dpp_recording(task: dict[str, Any]) -> dict[str, Any]:
                 "stage": "dpp",
                 "definition": task["definition"],
                 "candidates": candidate_config_id,
-                "recording": recording,
+                **_group_key(task["grouping"], recording),
                 "kernel_method": str(kernel_method),
                 "w_interaction": interaction,
             }
@@ -143,6 +230,10 @@ def _process_dpp_recording(task: dict[str, Any]) -> dict[str, Any]:
             ]
             summary = summarize_losses(selected_losses, selected_utility)
             selected_set = {window_ids[index] for index in selected_indices}
+            normalized = _normalized_pivots(
+                gains, selected_positions, similarity, utility, str(kernel_method), interaction, epsilon
+            )
+            operational_rank = int(np.sum(normalized > OPERATIONAL_PIVOT_THRESHOLD))
             run = {
                 "run_id": current_run_id,
                 "config_id": f"{candidate_config_id}:{kernel_method}",
@@ -150,10 +241,14 @@ def _process_dpp_recording(task: dict[str, Any]) -> dict[str, Any]:
                 "direction": direction,
                 "scope": scope,
                 "candidate_run_id": candidate_run_id,
-                "big_recording_index": recording,
+                **_group_columns(task["grouping"], recording),
+                "allocation": task["allocation"],
                 "candidate_k": candidate_k,
                 "selection_eta": selection_eta,
                 "actual_size": len(selected_indices),
+                "operational_rank": operational_rank,
+                "n_degenerate_steps": int(np.sum(normalized <= DEGENERATE_PIVOT_FACTOR * epsilon)),
+                "rank_limited": selection_k > operational_rank,
                 "kernel_method": str(kernel_method),
                 "w_interaction": interaction,
                 "vendi_score": selected_vendi,
@@ -232,9 +327,15 @@ def _run_schema() -> pa.Schema:
             ("scope", pa.string()),
             ("candidate_run_id", pa.string()),
             ("big_recording_index", pa.int64()),
+            ("grouping", pa.string()),
+            ("group_id", pa.int64()),
+            ("allocation", pa.string()),
             ("candidate_k", pa.int32()),
             ("selection_eta", pa.float64()),
             ("actual_size", pa.int32()),
+            ("operational_rank", pa.int32()),
+            ("n_degenerate_steps", pa.int32()),
+            ("rank_limited", pa.bool_()),
             ("kernel_method", pa.string()),
             ("w_interaction", pa.float64()),
             ("vendi_score", pa.float64()),
@@ -305,6 +406,19 @@ def build(config: dict[str, Any]) -> dict[str, Any]:
     embeddings = np.asarray(
         source["embedding"].combine_chunks().values.to_numpy(zero_copy_only=False), dtype=np.float32
     ).reshape(-1, 512)
+    grouping, group_ids = _load_grouping(config, window_ids, recording_ids)
+    window_order = np.empty(len(window_ids), dtype=np.int64)
+    window_order[np.asarray(sorted(range(len(window_ids)), key=window_ids.__getitem__), dtype=np.int64)] = np.arange(
+        len(window_ids), dtype=np.int64
+    )
+    group_order = np.argsort(group_ids, kind="stable")
+    group_values, group_starts = np.unique(group_ids[group_order], return_index=True)
+    group_index = dict(
+        zip(group_values.tolist(), np.split(group_order, group_starts[1:]), strict=True)
+    )  # group -> ascending source indices
+    group_sizes = {group: len(indices) for group, indices in group_index.items()}
+    tie_tolerance_value = numerical_config.get("tie_tolerance", 1.0e-9)
+    tie_tolerance = None if tie_tolerance_value is None else float(tie_tolerance_value)
     epsilon = float(numerical_config.get("epsilon", 1.0e-6))
     max_workspace_gib = float(numerical_config.get("max_workspace_gib", 8.0))
     seed = int(config.get("projection", {}).get("seed", 0))
@@ -334,24 +448,22 @@ def build(config: dict[str, Any]) -> dict[str, Any]:
         configured_candidate_k = int(definition.get("candidate_k", 0))
         if selection_eta is None and configured_candidate_k <= 0:
             raise AtlasDataError(f"Ranking {config_id} needs selection_eta or positive candidate_k")
-        if direction not in {"top", "bottom"} or scope not in {"global", "per_recording"}:
+        if direction not in {"top", "bottom"} or scope not in {"global", "per_recording", "per_group"}:
             raise AtlasDataError(f"Invalid ranking definition {config_id}: direction={direction}, scope={scope}")
-        groups = [None] if scope == "global" else sorted(set(map(int, recording_ids.tolist())))
+        allocation = str(definition.get("allocation", "proportional"))
+        allocated = allocate(group_sizes, selection_eta, allocation) if selection_eta is not None and scope != "global" else {}
+        groups = [None] if scope == "global" else sorted(group_index)
         for recording in groups:
-            indices = (
-                np.arange(len(window_ids), dtype=np.int64)
-                if recording is None
-                else np.flatnonzero(recording_ids == recording)
-            )
+            indices = np.arange(len(window_ids), dtype=np.int64) if recording is None else group_index[recording]
             selection_k = (
-                max(1, min(len(indices), int(np.ceil(selection_eta * len(indices)))))
+                (allocated.get(recording) or max(1, min(len(indices), int(np.ceil(selection_eta * len(indices))))))
                 if selection_eta is not None
                 else min(len(indices), configured_candidate_k)
             )
             order = _ranking_order(losses, window_ids, direction, indices)[:selection_k]
             selected_losses = losses[order]
             utility, utility_min, utility_max = normalize_utility(selected_losses, direction)
-            run_configuration = {"stage": "ranking", "definition": definition, "recording": recording}
+            run_configuration = {"stage": "ranking", "definition": definition, **_group_key(grouping, recording)}
             current_run_id = run_id(source_fingerprint, run_configuration)
             row_members = [
                 {
@@ -374,7 +486,8 @@ def build(config: dict[str, Any]) -> dict[str, Any]:
                 "direction": direction,
                 "scope": scope,
                 "candidate_run_id": None,
-                "big_recording_index": recording,
+                **_group_columns(grouping, recording),
+                "allocation": allocation,
                 "candidate_k": len(indices),
                 "selection_eta": selection_eta if selection_eta is not None else float(len(order) / len(indices)),
                 "actual_size": len(order),
@@ -407,18 +520,20 @@ def build(config: dict[str, Any]) -> dict[str, Any]:
         scope = str(definition.get("scope", "per_recording"))
         selection_eta = float(definition["selection_eta"])
         baseline_seed = int(definition.get("seed", seed))
-        if scope != "per_recording":
-            raise AtlasDataError(f"Random baseline {config_id} must use scope=per_recording")
+        if scope not in {"per_recording", "per_group"}:
+            raise AtlasDataError(f"Random baseline {config_id} must use scope=per_recording or per_group")
         if not 0.0 < selection_eta <= 1.0:
             raise AtlasDataError(f"Invalid selection_eta for random baseline {config_id}: {selection_eta}")
-        for recording in sorted(set(map(int, recording_ids.tolist()))):
-            indices = np.flatnonzero(recording_ids == recording)
-            selection_k = max(1, min(len(indices), int(np.ceil(selection_eta * len(indices)))))
+        allocation = str(definition.get("allocation", "proportional"))
+        allocated = allocate(group_sizes, selection_eta, allocation)
+        for recording in sorted(group_index):
+            indices = group_index[recording]
+            selection_k = allocated[recording]
             generator = np.random.default_rng(baseline_seed + recording)
             order = generator.choice(indices, size=selection_k, replace=False).astype(np.int64)
             selected_losses = losses[order]
             utility = np.ones(selection_k, dtype=np.float64)
-            run_configuration = {"stage": "random_stratified", "definition": definition, "recording": recording}
+            run_configuration = {"stage": "random_stratified", "definition": definition, **_group_key(grouping, recording)}
             current_run_id = run_id(source_fingerprint, run_configuration)
             row_members = [
                 {
@@ -441,7 +556,8 @@ def build(config: dict[str, Any]) -> dict[str, Any]:
                 "direction": "random",
                 "scope": scope,
                 "candidate_run_id": None,
-                "big_recording_index": recording,
+                **_group_columns(grouping, recording),
+                "allocation": allocation,
                 "candidate_k": len(indices),
                 "selection_eta": selection_eta,
                 "actual_size": selection_k,
@@ -472,7 +588,8 @@ def build(config: dict[str, Any]) -> dict[str, Any]:
         _WORKER_DATA["embeddings"] = embeddings
         _WORKER_DATA["losses"] = losses
         _WORKER_DATA["window_ids"] = window_ids
-        _WORKER_DATA["recording_ids"] = recording_ids
+        _WORKER_DATA["group_ids"] = group_ids
+        _WORKER_DATA["window_order"] = window_order
         _WORKER_DATA["source_indices_by_run"] = source_indices_by_run
 
     for definition in config.get("dpp", []):
@@ -482,9 +599,11 @@ def build(config: dict[str, Any]) -> dict[str, Any]:
         if not 0.0 < selection_eta <= 1.0:
             raise AtlasDataError(f"Invalid selection_eta for DPP {candidate_config_id}: {selection_eta}")
         requested_recordings = [
-            int(value) for value in definition.get("recording_indices", sorted(set(map(int, recording_ids.tolist()))))
+            int(value) for value in definition.get("group_ids", definition.get("recording_indices", sorted(group_index)))
         ]
         full_population = bool(definition.get("full_population", True))
+        allocation = str(definition.get("allocation", "proportional"))
+        allocated = allocate(group_sizes, selection_eta, allocation) if full_population else {}
         kernel_definitions = dict(definition["kernels"])
         candidate_definition = next(
             (dict(item) for item in config.get("rankings", []) if str(item["id"]) == candidate_config_id), None
@@ -517,6 +636,11 @@ def build(config: dict[str, Any]) -> dict[str, Any]:
                     "source_fingerprint": source_fingerprint,
                     "configuration_fingerprint": configuration_fingerprint,
                     "definition": definition,
+                    "grouping": grouping,
+                    "allocation": allocation,
+                    "selection_k": allocated.get(recording),
+                    "tie_tolerance": tie_tolerance,
+                    "dpp_backend": str(numerical_config.get("dpp_backend", "auto")),
                 }
             )
 
@@ -544,6 +668,7 @@ def build(config: dict[str, Any]) -> dict[str, Any]:
                     (run["w_interaction"], run["run_id"])
                 )
 
+    run_by_id = {run["run_id"]: run for run in runs}
     # Adjacent overlap is defined only among runs with the same candidate,
     # recording, and kernel, and is symmetric at the ends of each sweep.
     for group in dpp_groups.values():
@@ -559,7 +684,7 @@ def build(config: dict[str, Any]) -> dict[str, Any]:
                 if 0 <= neighbor_position < len(group):
                     other = membership_by_run[group[neighbor_position][1]]
                     union_sizes.append(jaccard(membership_by_run[current_run_id], other))
-            next(run for run in runs if run["run_id"] == current_run_id)["adjacent_jaccard"] = (
+            run_by_id[current_run_id]["adjacent_jaccard"] = (
                 float(np.mean(union_sizes)) if union_sizes else None
             )
 
@@ -587,6 +712,8 @@ def build(config: dict[str, Any]) -> dict[str, Any]:
         "population": str(input_config.get("population", "source")),
         "ranking_runs": sum(run["method"] == "ranking" for run in runs),
         "dpp_runs": sum(run["method"] == "dpp" for run in runs),
+        "grouping": grouping,
+        "groups": len(group_index),
     }
     atomic_write_json(manifest, manifest_path)
     return manifest

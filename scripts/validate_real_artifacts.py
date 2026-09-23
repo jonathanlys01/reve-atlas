@@ -17,7 +17,8 @@ from scripts.real_atlas import AtlasDataError, config_fingerprint, fingerprint_p
 def validate(config: dict[str, object]) -> None:
     output_directory = Path(str(config.get("output", {}).get("directory", "data/real"))).expanduser()
     manifest = json.loads((output_directory / "manifest.json").read_text(encoding="utf-8"))
-    atlas = pq.read_table(output_directory / "atlas.parquet")
+    atlas_artifact = str(config.get("output", {}).get("atlas_artifact", "atlas.parquet"))
+    atlas = pq.read_table(output_directory / atlas_artifact)
     selections = pq.read_table(output_directory / "selections.parquet")
     runs = pq.read_table(output_directory / "selection_runs.parquet")
     for table_name, table in (("atlas", atlas), ("selections", selections), ("selection_runs", runs)):
@@ -37,7 +38,7 @@ def validate(config: dict[str, object]) -> None:
     atlas_ids = set(row_ids)
     selection_ids = selections["row_id"].combine_chunks().to_pylist()
     if not set(selection_ids) <= atlas_ids:
-        raise AtlasDataError("Selection membership references a row absent from atlas.parquet")
+        raise AtlasDataError(f"Selection membership references a row absent from {atlas_artifact}")
     run_rows = runs.to_pylist()
     selection_rows = selections.to_pylist()
     counts: dict[str, int] = {}

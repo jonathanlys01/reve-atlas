@@ -24,12 +24,15 @@ def greedy_map(
     interaction: float,
     selection_k: int,
     epsilon: float,
+    tie_order: np.ndarray | None = None,
+    tie_tolerance: float | None = None,
 ) -> tuple[list[int], list[float], float]:
     """Run deterministic single-start greedy MAP on a full per-index pool.
 
     The candidate Gram matrix is still the complete display-index matrix, but
     Cholesky residuals are updated on the GPU without materializing a second
-    candidate-by-candidate workspace for every greedy step.
+    candidate-by-candidate workspace for every greedy step. ``tie_order``/``tie_tolerance``
+    apply the same near-tie rule as ``real_atlas._greedy_select``.
     """
     import torch
 
@@ -52,11 +55,21 @@ def greedy_map(
     residual = torch.diagonal(kernel).clone()
     factors = torch.zeros((selection_k, candidate_count), dtype=matrix.dtype, device=matrix.device)
     selected_mask = torch.zeros(candidate_count, dtype=torch.bool, device=matrix.device)
+    order_tensor = (
+        None
+        if tie_order is None or tie_tolerance is None
+        else torch.as_tensor(np.asarray(tie_order), dtype=torch.float64, device=matrix.device)
+    )
     selected: list[int] = []
     gains: list[float] = []
     for step in range(selection_k):
         scores = residual.masked_fill(selected_mask, -torch.inf)
         winner = int(torch.argmax(scores).item())
+        if order_tensor is not None:
+            best = scores[winner]
+            tied = scores >= best - torch.abs(best) * float(tie_tolerance)
+            if int(tied.sum().item()) > 1:
+                winner = int(torch.argmin(order_tensor.masked_fill(~tied, torch.inf)).item())
         pivot = torch.sqrt(torch.clamp(residual[winner], min=float(epsilon)))
         row = kernel[winner, :].clone()
         if step:

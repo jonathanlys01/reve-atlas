@@ -9,4 +9,5 @@ __pycache__/
 data/*.parquet
 data/real/
 public/data/*.parquet
+public/data/clusters
 .env.local

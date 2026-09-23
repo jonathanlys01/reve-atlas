@@ -2,10 +2,19 @@
   import { Coordinator, wasmConnector } from "@uwdata/mosaic-core";
   import * as SQL from "@uwdata/mosaic-sql";
   import { EmbeddingAtlas } from "embedding-atlas/svelte";
+  import { parseClusteredRun, verifyClusteredMemberships, type ClusteredRun } from "./clusteredRun";
 
   type Method = "ranking" | "dpp";
-  type Scope = "global" | "per_recording";
-  type Eta = "eta_001" | "eta_010";
+  type Scope = "global" | "per_recording" | "per_group";
+  type Eta = "eta_001" | "eta_003" | "eta_010";
+  const ETA_VALUE: Record<Eta, number> = { eta_001: 0.01, eta_003: 0.03, eta_010: 0.10 };
+  // Optional columns written by the hierarchical-group artifact sets; the default table lacks them.
+  const GROUP_CHART_COLUMNS = ["group_split", "group_depth", "group_size"];
+  // Map-coloring palette for the precomputed ``group_colour`` column (adjacent groups differ).
+  const GROUP_COLORS = [
+    "#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#eeca3b",
+    "#b279a2", "#ff9da6", "#9d755d", "#79706e", "#1f77b4", "#8c564b",
+  ];
   type Run = {
     run_id: string;
     config_id: string;
@@ -57,11 +66,41 @@
     "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/selection_runs_web.parquet";
   const DEFAULT_CURVES_URL =
     "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/curve_summary.parquet";
-  const atlasUrl =
-    import.meta.env.VITE_ATLAS_ATLAS_URL ?? import.meta.env.VITE_ATLAS_DATA_URL ?? DEFAULT_ATLAS_URL;
-  const selectionsUrl = import.meta.env.VITE_ATLAS_SELECTIONS_URL ?? DEFAULT_SELECTIONS_URL;
-  const runsUrl = import.meta.env.VITE_ATLAS_RUNS_URL ?? DEFAULT_RUNS_URL;
-  const curvesUrl = import.meta.env.VITE_ATLAS_CURVES_URL ?? DEFAULT_CURVES_URL;
+  // Embedding-space group sets (hierarchical DPP experiment), selected with ?set=<name>. Each is a
+  // complete artifact set (display + group columns, selections, runs, curves) under
+  // <clusters base>/<name>/; without ?set the published per-recording tables load as before.
+  const GROUP_SETS = [
+    { name: "dbscan_hier_proportional", label: "DBSCAN groups (k-means fallback) · proportional" },
+    { name: "dbscan_hier_flat", label: "DBSCAN groups (k-means fallback) · flat" },
+    { name: "kmeans_control_proportional", label: "k-means control groups · proportional" },
+    { name: "kmeans_control_flat", label: "k-means control groups · flat" },
+  ] as const;
+  const DEFAULT_CLUSTERS_BASE_URL = "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/clusters";
+  const requestedSet = new URLSearchParams(window.location.search).get("set");
+  const groupSet = GROUP_SETS.find((item) => item.name === requestedSet) ?? null;
+  const groupSetBase = groupSet
+    ? `${(import.meta.env.VITE_ATLAS_CLUSTERS_BASE_URL ?? DEFAULT_CLUSTERS_BASE_URL).replace(/\/$/, "")}/${groupSet.name}`
+    : "";
+  const atlasUrl = groupSet ? `${groupSetBase}/display.parquet`
+    : import.meta.env.VITE_ATLAS_ATLAS_URL ?? import.meta.env.VITE_ATLAS_DATA_URL ?? DEFAULT_ATLAS_URL;
+  const selectionsUrl = groupSet ? `${groupSetBase}/selections.parquet`
+    : import.meta.env.VITE_ATLAS_SELECTIONS_URL ?? DEFAULT_SELECTIONS_URL;
+  const runsUrl = groupSet ? `${groupSetBase}/selection_runs_web.parquet`
+    : import.meta.env.VITE_ATLAS_RUNS_URL ?? DEFAULT_RUNS_URL;
+  const curvesUrl = groupSet ? `${groupSetBase}/curve_summary.parquet`
+    : import.meta.env.VITE_ATLAS_CURVES_URL ?? DEFAULT_CURVES_URL;
+  // Group sets share the published display population, so the clustered overlay still applies.
+  const clusteredRunUrl = import.meta.env.VITE_ATLAS_CLUSTERED_RUN_URL ??
+    (atlasUrl === DEFAULT_ATLAS_URL || groupSet
+      ? "https://huggingface.co/datasets/jonathan-lys/reve-atlas/resolve/main/data/clustered_run.json"
+      : "");
+  function switchGroupSet(name: string): void {
+    const url = new URL(window.location.href);
+    if (name) url.searchParams.set("set", name);
+    else url.searchParams.delete("set");
+    window.location.assign(url.toString());
+  }
+  const clusteredManifestUrl = clusteredRunUrl ? new URL("clustered_manifest.txt?download=true", clusteredRunUrl).toString() : "";
   const datasetTokenUrl = new URL(`${import.meta.env.BASE_URL}dataset_token.json`, window.location.href).toString();
   const REQUIRED_COLUMNS = [
     "row_id", "window_id", "projection_x", "projection_y", "recon_loss",
@@ -72,9 +111,11 @@
     "#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2",
     "#eeca3b", "#b279a2", "#ff9da6", "#9d755d", "#bab0ac",
   ];
-  const POINT_LABEL_SQL = `(
-    dataset || ' · ' || modality || ' · ' || n_channels::VARCHAR || ' ch · rec ' || big_recording_index::VARCHAR
+  function pointLabelSql(withGroup: boolean): string {
+    return `(
+    dataset || ' · ' || modality || ' · ' || n_channels::VARCHAR || ' ch · rec ' || big_recording_index::VARCHAR${withGroup ? " || ' · group ' || group_id::VARCHAR" : ""}
   ) AS point_label`;
+  }
   const CHANNEL_PREDICATE_ITEMS = [
     { name: "19 ch", predicate: "n_channels = 19" },
     { name: "21 ch", predicate: "n_channels = 21" },
@@ -116,6 +157,8 @@
   const DPP_FILTERS = [
     { key: "eta_001_multiplicative", eta: 0.01, etaLabel: "1%", kernel: "multiplicative", kernelLabel: "Multiplicative" },
     { key: "eta_001_additive", eta: 0.01, etaLabel: "1%", kernel: "additive", kernelLabel: "Additive" },
+    { key: "eta_003_multiplicative", eta: 0.03, etaLabel: "3%", kernel: "multiplicative", kernelLabel: "Multiplicative" },
+    { key: "eta_003_additive", eta: 0.03, etaLabel: "3%", kernel: "additive", kernelLabel: "Additive" },
     { key: "eta_010_multiplicative", eta: 0.10, etaLabel: "10%", kernel: "multiplicative", kernelLabel: "Multiplicative" },
     { key: "eta_010_additive", eta: 0.10, etaLabel: "10%", kernel: "additive", kernelLabel: "Additive" },
   ] as const;
@@ -137,9 +180,45 @@
 
   let realMode = false;
   let runs: Run[] = [];
+  let groupChartColumns: string[] = [];
+  let hasGroups = false;
+  let groupCount = 0;
+  let colourBy: "dataset" | "group" = "dataset";
+  let groupFilterId: number | null = null;
+  const groupFilterSource = { reset: () => groupFilterId = null };
+
+  async function applyGroupFilter(): Promise<void> {
+    let group = [...coordinator.filterGroups.values()].sort((a, b) => b.clients.size - a.clients.size)[0];
+    for (let attempt = 0; !group && attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      group = [...coordinator.filterGroups.values()].sort((a, b) => b.clients.size - a.clients.size)[0];
+    }
+    if (!group) return;
+    const id = groupFilterId === null ? null : Math.max(0, Math.min(groupCount - 1, Math.round(groupFilterId)));
+    group.selection.update({
+      source: groupFilterSource,
+      value: id,
+      predicate: id === null ? null : SQL.eq(SQL.column("group_id"), SQL.literal(id)),
+    });
+  }
+  function stepGroup(delta: number): void {
+    groupFilterId = groupFilterId === null ? 0 : (groupFilterId + delta + groupCount) % groupCount;
+    applyGroupFilter();
+  }
+  async function setColourBy(): Promise<void> {
+    // The atlas component is re-created on a color change; re-apply the rail filters to it.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await applyAtlasDppFilter();
+    await applyGroupFilter();
+  }
+  $: hasEta003 = runs.some((run) => run.selection_eta === 0.03);
+  $: scopeLabel = runs.some((run) => run.scope === "per_group") ? "per group" : "per recording";
   let curveSummary: CurveSummaryRow[] = [];
   let railTab: "explore" | "curves" = "explore";
   let activeTableName = "";
+  let clusteredRun: ClusteredRun | null = null;
+  let clusteredError = "";
+  let atlasSelectionStrategy: "recording" | "clustered" = "recording";
   let atlasDppMode: "all" | "selected" = "all";
   let atlasDppDirection: "top" | "bottom" = "bottom";
   let atlasDppEta: Eta = "eta_010";
@@ -148,7 +227,7 @@
   const atlasDppFilterSource = { reset: () => atlasDppMode = "all" };
   $: atlasWValues = [...new Set(
     runs.filter((run) => run.method === "dpp" && run.direction === atlasDppDirection &&
-      run.selection_eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) && run.kernel_method === atlasDppKernel)
+      run.selection_eta === ETA_VALUE[atlasDppEta] && run.kernel_method === atlasDppKernel)
       .map((run) => run.w_interaction)
       .filter((value): value is number => value !== null),
   )].sort((a, b) => a - b);
@@ -163,14 +242,18 @@
     }
     if (!group) return;
     const filter = DPP_FILTERS.find((item) =>
-      item.eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) && item.kernel === atlasDppKernel);
+      item.eta === ETA_VALUE[atlasDppEta] && item.kernel === atlasDppKernel);
     const weightIndex = resetWeight ? 0 : Math.min(atlasWIndex, Math.max(0, atlasWValues.length - 1));
     const value = atlasWValues[weightIndex] ?? null;
+    const clustered = atlasSelectionStrategy === "clustered";
     group.selection.update({
       source: atlasDppFilterSource,
-      value: atlasDppMode === "selected" ? { direction: atlasDppDirection, eta: atlasDppEta, kernel: atlasDppKernel, w: value } : null,
-      predicate: atlasDppMode === "selected" && filter && value !== null
-        ? SQL.listContains(dppColumn(atlasDppDirection, filter), value)
+      value: atlasDppMode === "selected"
+        ? { strategy: atlasSelectionStrategy, direction: atlasDppDirection, eta: atlasDppEta, kernel: atlasDppKernel, w: value }
+        : null,
+      predicate: atlasDppMode !== "selected" ? null
+        : clustered && clusteredRun ? SQL.eq(SQL.column("clustered_selected"), true)
+        : !clustered && filter && value !== null ? SQL.listContains(dppColumn(atlasDppDirection, filter), value)
         : null,
     });
   }
@@ -194,14 +277,14 @@
   // w varies and are comparable against the stratified baseline below.
   $: curveMultiplicative = curveSummary
     .filter((row) => row.method === "dpp" && row.direction === curveDirection &&
-      row.selection_eta === (curveEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === "multiplicative")
+      row.selection_eta === ETA_VALUE[curveEta] && row.kernel_method === "multiplicative")
     .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0));
   $: curveAdditive = curveSummary
     .filter((row) => row.method === "dpp" && row.direction === curveDirection &&
-      row.selection_eta === (curveEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === "additive")
+      row.selection_eta === ETA_VALUE[curveEta] && row.kernel_method === "additive")
     .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0));
   $: strataBaseline = curveSummary.find((row) =>
-    row.method === "random_stratified" && row.selection_eta === (curveEta === "eta_010" ? 0.10 : 0.01)) ?? null;
+    row.method === "random_stratified" && row.selection_eta === ETA_VALUE[curveEta]) ?? null;
   // The baseline sits far from the DPP curve on both metrics, so including it in
   // the axis bounds can squash the curve down to a sliver — showBaseline lets it
   // be excluded from both the plotted marker and the bounds it would otherwise stretch.
@@ -283,11 +366,11 @@
 
   $: atlasMultiplicativeCurve = curveSummary
     .filter((row) => row.method === "dpp" && row.direction === atlasDppDirection &&
-      row.selection_eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === "multiplicative")
+      row.selection_eta === ETA_VALUE[atlasDppEta] && row.kernel_method === "multiplicative")
     .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0));
   $: atlasAdditiveCurve = curveSummary
     .filter((row) => row.method === "dpp" && row.direction === atlasDppDirection &&
-      row.selection_eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) && row.kernel_method === "additive")
+      row.selection_eta === ETA_VALUE[atlasDppEta] && row.kernel_method === "additive")
     .sort((a, b) => (a.w_interaction ?? 0) - (b.w_interaction ?? 0));
   $: atlasCombinedCurves = [...atlasMultiplicativeCurve, ...atlasAdditiveCurve];
   $: atlasVendiMin = atlasCombinedCurves.length ? Math.min(...atlasCombinedCurves.map((row) => row.vendi_score_mean)) : 0;
@@ -312,7 +395,7 @@
       const kernelRuns = runs.filter((run) =>
         run.method === "dpp" &&
         run.direction === atlasDppDirection &&
-        run.selection_eta === (atlasDppEta === "eta_010" ? 0.10 : 0.01) &&
+        run.selection_eta === ETA_VALUE[atlasDppEta] &&
         run.kernel_method === point.kernel,
       );
       const wValues = [...new Set(kernelRuns.map((r) => r.w_interaction).filter((v): v is number => v !== null))].sort((a, b) => a - b);
@@ -396,11 +479,55 @@
     labelCharts = charts;
   }
 
+  async function loadClusteredOverlay(wasm: Awaited<ReturnType<typeof wasmConnector>>): Promise<void> {
+    await coordinator.exec("CREATE OR REPLACE TABLE clustered_memberships (row_id VARCHAR)");
+    if (!clusteredRunUrl) return;
+    try {
+      const response = await fetch(clusteredRunUrl, { cache: "no-store" });
+      if (response.status === 404) return; // An older publication remains fully usable.
+      if (!response.ok) throw new Error(`Clustered run metadata: HTTP ${response.status}`);
+      const run = parseClusteredRun(await response.json());
+      const membershipUrl = new URL("clustered_selections.parquet", clusteredRunUrl).toString();
+      const membershipResponse = await fetch(membershipUrl, { cache: "no-store" });
+      if (!membershipResponse.ok) throw new Error(`Clustered memberships: HTTP ${membershipResponse.status}`);
+      const bytes = new Uint8Array(await membershipResponse.arrayBuffer());
+      await verifyClusteredMemberships(bytes, run.memberships_sha256);
+      const duckdb = await wasm.getDuckDB();
+      await duckdb.registerFileBuffer("clustered_selections.parquet", bytes);
+      await coordinator.exec(`CREATE OR REPLACE TABLE clustered_memberships AS
+        SELECT row_id FROM read_parquet('clustered_selections.parquet')`);
+      const rows = await coordinator.query(`SELECT count(*)::INTEGER AS total, count(DISTINCT row_id)::INTEGER AS unique_ids,
+        count(*) FILTER (WHERE row_id IS NULL)::INTEGER AS null_ids FROM clustered_memberships`, { type: "json" }) as
+        {total: number; unique_ids: number; null_ids: number}[];
+      if (rows[0].total !== run.display_selected_rows || rows[0].unique_ids !== rows[0].total || rows[0].null_ids) {
+        throw new Error("Clustered display count or uniqueness check failed");
+      }
+      const population = await coordinator.query(`SELECT count(*)::INTEGER AS total FROM atlas_source`, {type: "json"}) as {total: number}[];
+      const missing = await coordinator.query(`SELECT count(*)::INTEGER AS total FROM clustered_memberships
+        WHERE NOT EXISTS (SELECT 1 FROM atlas_source WHERE atlas_source.row_id = clustered_memberships.row_id)`, {type: "json"}) as {total: number}[];
+      if (population[0].total !== run.display_rows || missing[0].total !== 0) {
+        throw new Error("Clustered overlay belongs to a different display population");
+      }
+      clusteredRun = run;
+    } catch (error) {
+      clusteredError = error instanceof Error ? error.message : String(error);
+      await coordinator.exec("CREATE OR REPLACE TABLE clustered_memberships (row_id VARCHAR)");
+    }
+  }
+
   async function initialize(): Promise<void> {
     const wasm = await wasmConnector();
     dbConnector = wasm;
     coordinator.databaseConnector(wasm);
     await coordinator.exec(`CREATE OR REPLACE VIEW atlas_source AS SELECT * FROM read_parquet(${SQL.literal(atlasUrl)})`);
+    const sourceColumns = (await coordinator.query("DESCRIBE atlas_source", { type: "json" })) as { column_name: string }[];
+    const sourceColumnNames = new Set(sourceColumns.map((row) => row.column_name));
+    hasGroups = sourceColumnNames.has("group_id") && sourceColumnNames.has("group_colour");
+    groupChartColumns = GROUP_CHART_COLUMNS.filter((column) => sourceColumnNames.has(column));
+    if (hasGroups) {
+      const [row] = (await coordinator.query("SELECT max(group_id) + 1 AS n FROM atlas_source", { type: "json" })) as { n: number }[];
+      groupCount = Number(row.n);
+    }
     // Small per-dataset lookup (task modality, domain, any further label), joined onto "dataset" —
     // not worth duplicating into the main parquet since it only varies per dataset, not per point.
     await loadDatasetClasses();
@@ -409,7 +536,7 @@
     if (!realMode) {
       await coordinator.exec(`
         CREATE OR REPLACE TABLE display_points AS
-        SELECT atlas_source.*, ${labelSelect}${POINT_LABEL_SQL}, ${CHANNEL_GROUP_SQL}
+        SELECT atlas_source.*, ${labelSelect}${pointLabelSql(hasGroups)}, ${CHANNEL_GROUP_SQL}
         FROM atlas_source
         LEFT JOIN dataset_classes USING (dataset)
         WHERE hash(row_id) % 100 < 8
@@ -441,12 +568,13 @@
     `);
     await coordinator.exec(`CREATE OR REPLACE TABLE curve_summary_table AS SELECT * FROM read_parquet(${SQL.literal(curvesUrl)})`);
     curveSummary = (await coordinator.query("SELECT * FROM curve_summary_table", { type: "json" })) as CurveSummaryRow[];
+    await loadClusteredOverlay(wasm);
     await coordinator.exec(`
       CREATE OR REPLACE TABLE display_points AS
       WITH required_points AS (
         SELECT DISTINCT atlas_source.*
         FROM atlas_source
-        INNER JOIN (SELECT DISTINCT row_id FROM selection_memberships) AS members USING (row_id)
+        INNER JOIN (SELECT row_id FROM selection_memberships UNION SELECT row_id FROM clustered_memberships) AS members USING (row_id)
       ), sampled_points AS (
         SELECT atlas_source.*
         FROM atlas_source
@@ -454,7 +582,7 @@
           AND NOT EXISTS (SELECT 1 FROM required_points WHERE required_points.row_id = atlas_source.row_id)
         LIMIT ${DISPLAY_SAMPLE_CAP}
       )
-      SELECT combined.*, ${labelSelect}${POINT_LABEL_SQL}, ${CHANNEL_GROUP_SQL} FROM (
+      SELECT combined.*, ${labelSelect}${pointLabelSql(hasGroups)}, ${CHANNEL_GROUP_SQL} FROM (
         SELECT * FROM required_points
         UNION ALL
         SELECT * FROM sampled_points
@@ -491,9 +619,11 @@
     `);
     await coordinator.exec(`
       CREATE OR REPLACE TABLE display_points_with_dpp AS
-      SELECT display_points.*, ${membershipColumns}
+      SELECT display_points.*, ${membershipColumns},
+        (clustered_memberships.row_id IS NOT NULL) AS clustered_selected
       FROM display_points
       LEFT JOIN dpp_memberships USING (row_id)
+      LEFT JOIN clustered_memberships USING (row_id)
     `);
     activeTableName = "display_points_with_dpp";
   }
@@ -551,9 +681,30 @@
             <button type="button" role="tab" class:active={railTab === "curves"} aria-selected={railTab === "curves"} disabled={curveMultiplicative.length <= 1 && curveAdditive.length <= 1} onclick={() => railTab = "curves"}>Operating curves</button>
           </div>
           {#if railTab === "explore"}
-            <p class="display-note">Display cap: about 2M points; all selection members are retained.</p>
+            <p class="display-note">Display: a fixed sample of about 2M points. Full-corpus totals are reported separately.</p>
+            <label class="set-picker">Candidate groups
+              <select value={groupSet?.name ?? ""} onchange={(event) => switchGroupSet(event.currentTarget.value)}>
+                <option value="">Per recording (published)</option>
+                {#each GROUP_SETS as item}<option value={item.name}>{item.label}</option>{/each}
+              </select>
+            </label>
+            {#if hasGroups}
+              <div class="control-stack group-controls">
+                <h3>Groups ({groupCount})</h3>
+                <label>Colour points by<select bind:value={colourBy} onchange={setColourBy}><option value="dataset">Dataset</option><option value="group">Group (map colours)</option></select></label>
+                <label>Show group
+                  <span class="group-stepper">
+                    <button type="button" onclick={() => stepGroup(-1)} aria-label="Previous group">◀</button>
+                    <input type="number" min="0" max={groupCount - 1} step="1" placeholder="all" bind:value={groupFilterId} onchange={applyGroupFilter} />
+                    <button type="button" onclick={() => stepGroup(1)} aria-label="Next group">▶</button>
+                    <button type="button" onclick={() => { groupFilterId = null; applyGroupFilter(); }}>All</button>
+                  </span>
+                </label>
+                <p class="explore-note">Groups are clusters in the 512-d embedding space; the 2-D projection scatters most of them, so isolate one group to see its footprint.</p>
+              </div>
+            {/if}
             <p class="explore-note">Filter the stable atlas by any precomputed DPP selection. These controls preserve the canvas and combine with the atlas charts.</p>
-            {#if atlasMultiplicativePoints.length > 1 || atlasAdditivePoints.length > 1}
+            {#if atlasSelectionStrategy === "recording" && (atlasMultiplicativePoints.length > 1 || atlasAdditivePoints.length > 1)}
               <div class="mini-curve">
                 <div class="mini-curve-header">
                   <h3>Vendi diversity / loss</h3>
@@ -639,16 +790,32 @@
               </div>
             {/if}
             <div class="control-stack dpp-controls">
+              <label>Selection strategy
+                <select bind:value={atlasSelectionStrategy} onchange={() => applyAtlasDppFilter()}>
+                  <option value="recording">Per-recording DPP sweep</option>
+                  {#if clusteredRun}<option value="clustered">Full-corpus clustered DPP</option>{/if}
+                </select>
+              </label>
               <label>Points<select bind:value={atlasDppMode} onchange={() => applyAtlasDppFilter()}><option value="all">All points</option><option value="selected">Selected only</option></select></label>
+              {#if atlasSelectionStrategy === "clustered" && clusteredRun}
+                <div class="clustered-summary">
+                  <p><strong>{clusteredRun.selected_rows.toLocaleString()}</strong> of {clusteredRun.source_rows.toLocaleString()} windows selected across the full corpus.</p>
+                  <p>Groups of {clusteredRun.group_size.toLocaleString()}, keeping {clusteredRun.keep_per_group.toLocaleString()} each; the final short group uses proportional retention.</p>
+                  <p>{clusteredRun.display_selected_rows.toLocaleString()} selected windows are in this display sample. Chart filters may narrow it further.</p>
+                  <a href={clusteredManifestUrl} target="_blank" rel="noreferrer">Download the complete window manifest</a>
+                </div>
+              {:else}
               <div class="compact-controls">
                 <label>Direction<select bind:value={atlasDppDirection} onchange={() => applyAtlasDppFilter(true)}><option value="bottom">Bottom loss</option><option value="top">Top loss</option></select></label>
-                <label>Candidate pool<select bind:value={atlasDppEta} onchange={() => applyAtlasDppFilter(true)}><option value="eta_010">10%</option><option value="eta_001">1%</option></select></label>
+                <label>Candidate pool<select bind:value={atlasDppEta} onchange={() => applyAtlasDppFilter(true)}><option value="eta_010">10%</option>{#if hasEta003}<option value="eta_003">3%</option>{/if}<option value="eta_001">1%</option></select></label>
               </div>
               <label>Kernel<select bind:value={atlasDppKernel} onchange={() => applyAtlasDppFilter(true)}><option value="multiplicative">Multiplicative</option><option value="additive">Additive</option></select></label>
               <label>Interaction weight
                 <input type="range" min="0" max={Math.max(0, atlasWValues.length - 1)} step="1" bind:value={atlasWIndex} oninput={() => applyAtlasDppFilter()} disabled={atlasDppMode === "all" || atlasWValues.length <= 1} />
                 <span class="sweep-value">{atlasWValue === null ? "—" : `w=${atlasWValue}`}</span>
               </label>
+              {/if}
+              {#if clusteredError}<p class="view-note">Clustered selection unavailable: {clusteredError}</p>{/if}
             </div>
           {/if}
         </div>
@@ -659,7 +826,7 @@
             <p class="view-note">Curve controls are independent from the atlas selection filters.</p>
             <div class="curve-controls">
               <label>Direction<select bind:value={curveDirection}><option value="bottom">Bottom loss</option><option value="top">Top loss</option></select></label>
-              <label>Candidate pool<select bind:value={curveEta}><option value="eta_010">10% per recording</option><option value="eta_001">1% per recording</option></select></label>
+              <label>Candidate pool<select bind:value={curveEta}><option value="eta_010">10% {scopeLabel}</option>{#if hasEta003}<option value="eta_003">3% {scopeLabel}</option>{/if}<option value="eta_001">1% {scopeLabel}</option></select></label>
               <label>Kernel<select bind:value={curveKernel}><option value="multiplicative">Multiplicative</option><option value="additive">Additive</option></select></label>
             </div>
               {#snippet operatingCurveChart(
@@ -793,7 +960,7 @@
       </aside>
     {/if}
     <section class="atlas-shell">
-      {#key realMode ? activeTableName : "demo"}
+      {#key realMode ? `${activeTableName}:${colourBy}` : "demo"}
         <EmbeddingAtlas
           {coordinator}
           data={{ table: realMode ? activeTableName : "display_points", id: "row_id", text: "point_label", projection: { x: "projection_x", y: "projection_y" } }}
@@ -801,7 +968,7 @@
             include: [
               "recon_loss", "dataset", "n_channels", "modality",
               ...labelColumns,
-              ...(realMode ? ["big_recording_index"] : []),
+              ...(realMode ? ["big_recording_index", ...groupChartColumns] : []),
             ],
             override: {
               n_channels: {
@@ -819,10 +986,10 @@
               },
               ...labelCharts,
             },
-            embedding: { data: { x: "projection_x", y: "projection_y", text: "point_label", category: "dataset" } },
+            embedding: { data: { x: "projection_x", y: "projection_y", text: "point_label", category: colourBy === "group" ? "group_colour" : "dataset" } },
             table: false,
           }}
-          chartTheme={{ categoryColors: DATASET_COLORS }}
+          chartTheme={{ categoryColors: colourBy === "group" ? GROUP_COLORS : DATASET_COLORS }}
           embeddingViewConfig={{ downsampleMaxPoints: DISPLAY_POINT_CAP, pointSize: 1.5 }}
           onExportSelection={exportSelection}
         />
@@ -893,6 +1060,11 @@
   .atlas-shell { min-width: 0; min-height: 0; width: 100%; height: 100%; overflow: hidden; position: relative; }
   .side-rail { z-index: 2; box-sizing: border-box; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; border-right: 1px solid var(--border); background: var(--panel-bg); }
   .panel-section { box-sizing: border-box; padding: 1.25rem 1rem; }
+  .group-controls { margin-bottom: 0.9rem; }
+  .set-picker { margin-bottom: 0.9rem; }
+  .group-controls h3 { margin: 0 0 0.35rem; font-size: 0.8rem; }
+  .group-stepper { display: flex; gap: 0.3rem; align-items: center; }
+  .group-stepper input { width: 5.5rem; }
   .panel-section + .panel-section { border-top: 1px solid var(--border); }
   h1 { margin: 0 0 0.55rem; color: var(--heading); font-size: 1.45rem; letter-spacing: -0.04em; }
   h2 { margin: 0.1rem 0 0.3rem; color: var(--heading); font-size: 1.15rem; }
@@ -908,6 +1080,8 @@
   .eyebrow { margin-bottom: 0.45rem; color: var(--eyebrow); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
   .control-stack { display: grid; gap: 0.75rem; }
   .compact-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+  .clustered-summary { display: grid; gap: 0.65rem; font-size: 0.78rem; line-height: 1.45; }
+  .clustered-summary a { color: var(--accent-strong); }
   .dpp-controls { padding-top: 1rem; border-top: 1px solid var(--border); }
   .curve-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; margin-bottom: 1rem; }
   label { display: grid; gap: 0.25rem; color: var(--text-muted); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }

@@ -314,8 +314,23 @@ def _stable_marginal(kernel: np.ndarray, selected: list[int], candidate: int, ep
     return max(float(kernel[candidate, candidate]) - correction, epsilon)
 
 
+def _tie_break_winner(scores: np.ndarray, tie_order: np.ndarray | None, tie_tolerance: float | None) -> int:
+    """argmax, or among near-maximal scores (>= max*(1-tol)) the one with the smallest tie_order."""
+    winner = int(np.argmax(scores))
+    if tie_order is None or tie_tolerance is None:
+        return winner
+    best = float(scores[winner])
+    tied = np.flatnonzero(scores >= best - abs(best) * tie_tolerance)
+    return int(tied[np.argmin(tie_order[tied])]) if len(tied) > 1 else winner
+
+
 def _greedy_select(
-    diagonal: np.ndarray, row_fn: Callable[[int], np.ndarray], selection_k: int, epsilon: float
+    diagonal: np.ndarray,
+    row_fn: Callable[[int], np.ndarray],
+    selection_k: int,
+    epsilon: float,
+    tie_order: np.ndarray | None = None,
+    tie_tolerance: float | None = None,
 ) -> tuple[list[int], list[float]]:
     """Core single-start incremental-Cholesky greedy selection.
 
@@ -325,6 +340,10 @@ def _greedy_select(
     before returning. It is called once per selection step, so it never needs
     the full n x n kernel materialized up front (see ``greedy_map_lazy``,
     which computes rows on demand from the similarity matrix instead).
+
+    With ``tie_order`` (e.g. window-id ranks) and ``tie_tolerance``, candidates whose
+    residual is within ``tie_tolerance`` (relative) of the maximum are resolved by the
+    smallest ``tie_order``, so the greedy path does not depend on rounding noise.
     """
     candidate_count = int(diagonal.shape[0])
     if not 0 < selection_k <= candidate_count:
@@ -336,7 +355,7 @@ def _greedy_select(
     gains: list[float] = []
     for step in range(selection_k):
         scores = np.where(selected_mask, -np.inf, residual)
-        winner = int(np.argmax(scores))
+        winner = _tie_break_winner(scores, tie_order, tie_tolerance)
         pivot_value = max(float(residual[winner]), epsilon)
         pivot = math.sqrt(pivot_value)
         row = np.asarray(row_fn(winner), dtype=np.float64)
@@ -377,7 +396,14 @@ def greedy_map(kernel: np.ndarray, selection_k: int, epsilon: float) -> tuple[li
 
 
 def greedy_map_lazy(
-    similarity: np.ndarray, utility: np.ndarray, method: str, interaction: float, selection_k: int, epsilon: float
+    similarity: np.ndarray,
+    utility: np.ndarray,
+    method: str,
+    interaction: float,
+    selection_k: int,
+    epsilon: float,
+    tie_order: np.ndarray | None = None,
+    tie_tolerance: float | None = None,
 ) -> tuple[list[int], list[float], float]:
     """Same result as ``greedy_map(build_kernel(similarity, utility, method, interaction, epsilon), ...)``,
     without ever materializing the full n x n kernel matrix.
@@ -406,7 +432,7 @@ def greedy_map_lazy(
     else:
         raise AtlasDataError(f"Unknown DPP kernel method: {method}")
 
-    selected, gains = _greedy_select(diagonal, row_fn, selection_k, epsilon)
+    selected, gains = _greedy_select(diagonal, row_fn, selection_k, epsilon, tie_order, tie_tolerance)
     final = build_kernel(similarity[np.ix_(selected, selected)], utility[selected], method, interaction, epsilon)
     sign, logdet = np.linalg.slogdet((final + final.T) * 0.5 + epsilon * np.eye(selection_k))
     if sign <= 0 or not math.isfinite(float(logdet)):
@@ -547,7 +573,30 @@ def project_embeddings(embeddings: np.ndarray, projection: dict[str, Any]) -> tu
             if device_requested == "cuda":
                 from cuml import UMAP  # type: ignore
 
-                model = UMAP(**parameters)
+                # cuML's `init` only accepts 'spectral'/'random'/a precomputed array, unlike
+                # umap-learn's 'pca' string; compute the PCA embedding ourselves and keep the
+                # human-readable "pca" tag (not the raw array) in `parameters` for provenance.
+                cuml_parameters = dict(parameters)
+                cuml_parameters["random_state"] = seed
+                if str(parameters.get("init", "")).lower() == "pca":
+                    from cuml.decomposition import PCA  # type: ignore
+
+                    pca_embedding = np.asarray(
+                        PCA(n_components=2, output_type="numpy").fit_transform(fit_values), dtype=np.float32
+                    )
+                    # Match umap-learn's own PCA-init convention (umap.umap_.noisy_scale_coords):
+                    # rescale so the largest coordinate is 10, plus a touch of noise to break
+                    # exact ties. Raw PCA output on L2-normalized embeddings is an order of
+                    # magnitude smaller than the scale UMAP's spread/min_dist dynamics assume,
+                    # which otherwise leaves most points unable to separate within n_epochs.
+                    max_coord = float(np.max(np.abs(pca_embedding)))
+                    if max_coord > 0:
+                        pca_embedding *= 10.0 / max_coord
+                    pca_embedding += np.random.default_rng(seed).normal(
+                        scale=0.0001, size=pca_embedding.shape
+                    ).astype(np.float32)
+                    cuml_parameters["init"] = pca_embedding
+                model = UMAP(**cuml_parameters)
                 projected = model.fit_transform(fit_values)
                 backend = "cuml"
                 device = "cuda"
